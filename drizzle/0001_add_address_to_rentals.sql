@@ -1,0 +1,1 @@
+ALTER TABLE "Rentals" ADD COLUMN "address" text;
