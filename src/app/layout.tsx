@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Rental Manager',
+  title: 'RentTrack',
   description: 'Manage rentals, billings, items, and customers.',
 };
 

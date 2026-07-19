@@ -53,7 +53,7 @@ export function Sidebar({ isMobileOpen = false, onMobileClose }: SidebarProps) {
       >
         <div className="flex items-center justify-between border-b p-4 md:border-b-0 md:p-6">
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-primary md:text-2xl">Rental Manager</h1>
+            <h1 className="text-xl font-bold tracking-tight text-primary md:text-2xl">RentTrack</h1>
             <p className="text-xs text-muted-foreground md:hidden">Manage rentals on the go</p>
           </div>
           <div className="flex items-center gap-2">

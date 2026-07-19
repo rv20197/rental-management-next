@@ -25,7 +25,7 @@ export function Layout({ children }: LayoutProps) {
           >
             <Menu className="size-4" />
           </Button>
-          <h1 className="text-base font-semibold text-primary">Rental Manager</h1>
+          <h1 className="text-base font-semibold text-primary">RentTrack</h1>
           <div className="w-8" />
         </div>
         <div className="min-w-0 flex-1 overflow-y-auto">
