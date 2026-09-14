@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import {
+  customers,
   inventoryUnits,
   items,
   rentals,
@@ -254,6 +255,19 @@ export const RentalService = {
           address: rentalData.address ?? null,
         })
         .returning();
+
+      if (rentalData.customerId && rentalData.address?.trim()) {
+        const [cust] = await tx
+          .select({ address: customers.address })
+          .from(customers)
+          .where(eq(customers.id, rentalData.customerId));
+        if (cust && (!cust.address || cust.address.trim() === '')) {
+          await tx
+            .update(customers)
+            .set({ address: rentalData.address.trim().slice(0, 255) })
+            .where(eq(customers.id, rentalData.customerId));
+        }
+      }
 
       await tx.insert(rentalItems).values(
         assigned.map((a) => ({

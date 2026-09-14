@@ -872,6 +872,18 @@ export default function BillingsPage() {
                     {selectedBilling.status}
                   </span>
                 </div>
+                {(selectedBilling.Rental?.address ||
+                  selectedBilling.Customer?.address ||
+                  selectedBilling.Rental?.Customer?.address) && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Address</p>
+                    <p className="font-semibold whitespace-pre-line">
+                      {selectedBilling.Rental?.address ||
+                        selectedBilling.Customer?.address ||
+                        selectedBilling.Rental?.Customer?.address}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>

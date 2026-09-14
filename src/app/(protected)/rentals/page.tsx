@@ -1085,7 +1085,17 @@ export default function RentalsPage() {
                 id="customer"
                 className="w-full p-2 border rounded-md bg-background text-sm"
                 value={newCustomerId}
-                onChange={(e) => setNewCustomerId(e.target.value === '' ? '' : Number(e.target.value))}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const cId = val === '' ? '' : Number(val);
+                  setNewCustomerId(cId);
+                  if (cId !== '') {
+                    const cust = allCustomers.find((c) => c.id === cId);
+                    if (cust?.address && !newAddress) {
+                      setNewAddress(cust.address);
+                    }
+                  }
+                }}
                 required
               >
                 <option value="">Select a customer</option>
@@ -1571,10 +1581,12 @@ export default function RentalsPage() {
                   <p className="text-muted-foreground">End Date</p>
                   <p className="font-semibold">{new Date(selectedRental.endDate).toLocaleDateString()}</p>
                 </div>
-                {selectedRental.address ? (
+                {(selectedRental.address || selectedRental.Customer?.address) ? (
                   <div className="col-span-2">
                     <p className="text-muted-foreground">Address</p>
-                    <p className="font-semibold whitespace-pre-line">{selectedRental.address}</p>
+                    <p className="font-semibold whitespace-pre-line">
+                      {selectedRental.address || selectedRental.Customer?.address}
+                    </p>
                   </div>
                 ) : null}
                 {(selectedRental.status === 'created' ||

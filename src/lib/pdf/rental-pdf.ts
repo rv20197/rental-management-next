@@ -148,9 +148,12 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       doc.text(customer?.phone || 'N/A', detailX, y, { lineBreak: false });
       y += 12;
 
+      const customerAddress =
+        billing.Rental?.address?.trim() || customer?.address?.trim() || billing.address?.trim() || 'N/A';
+      const addressHeight = doc.heightOfString(customerAddress, { width: RIGHT_EDGE - detailX });
       doc.text('Address:', MARGIN, y, { lineBreak: false });
-      doc.text(customer?.address || 'N/A', detailX, y, { width: RIGHT_EDGE - detailX });
-      y += 18;
+      doc.text(customerAddress, detailX, y, { width: RIGHT_EDGE - detailX });
+      y += Math.max(18, addressHeight + 6);
 
       doc.strokeColor('#cccccc').lineWidth(1).moveTo(MARGIN, y).lineTo(RIGHT_EDGE, y).stroke();
       y += 15;
