@@ -2,6 +2,9 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // Opt pdfkit out of bundling so its font files can be read properly
+  serverExternalPackages: ['pdfkit'],
+  
   turbopack: {
     root: path.join(__dirname),
   },
