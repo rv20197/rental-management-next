@@ -64,6 +64,14 @@ function toJsonSafe(value: unknown): unknown {
   return value;
 }
 
+function toJsonSafeRecord(value: unknown): Record<string, unknown> {
+  const safe = toJsonSafe(value);
+  if (safe && typeof safe === 'object' && !Array.isArray(safe)) {
+    return safe as Record<string, unknown>;
+  }
+  return {};
+}
+
 async function loadRentalAggregate(rentalId: number) {
   return db.query.rentals.findFirst({
     where: eq(rentals.id, rentalId),
@@ -122,7 +130,7 @@ function enrich(rentalData: RentalAggregateRecord) {
   }, 0);
 
   return {
-    ...toJsonSafe(rentalData),
+    ...toJsonSafeRecord(rentalData),
     baseAmount,
     transportCost,
     labourCost,
