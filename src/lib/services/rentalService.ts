@@ -11,6 +11,8 @@ import { calculateMonthsRented } from '@/lib/billing/months';
 import { calculateDefaultDeposit } from '@/lib/rental/deposit';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type RentalAggregate = Awaited<ReturnType<typeof loadRentalAggregate>>;
+type RentalAggregateRecord = NonNullable<RentalAggregate>;
 
 interface RentalItemInput {
   itemId: number;
@@ -42,11 +44,25 @@ interface UpdateRentalPayload {
   items?: RentalItemInput[];
 }
 
+type RentalStatus = typeof rentals.$inferSelect.status;
+
 const num = (v: unknown, fallback = 0): number => {
   if (v == null || v === '') return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
+
+function toJsonSafe(value: unknown): unknown {
+  if (value == null) return value;
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map((entry) => toJsonSafe(entry));
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, toJsonSafe(entry)]),
+    );
+  }
+  return value;
+}
 
 async function loadRentalAggregate(rentalId: number) {
   return db.query.rentals.findFirst({
@@ -60,7 +76,19 @@ async function loadRentalAggregate(rentalId: number) {
   });
 }
 
-function enrich(rentalData: any) {
+async function loadRentalAggregateTx(tx: Tx, rentalId: number) {
+  return tx.query.rentals.findFirst({
+    where: eq(rentals.id, rentalId),
+    with: {
+      Item: true,
+      Customer: true,
+      RentalItems: { with: { Item: true } },
+      Billings: true,
+    },
+  });
+}
+
+function enrich(rentalData: RentalAggregateRecord) {
   const months = calculateMonthsRented(
     new Date(rentalData.startDate),
     new Date(rentalData.endDate),
@@ -88,13 +116,13 @@ function enrich(rentalData: any) {
   const transportCost = num(rentalData.transportCost);
   const labourCost = num(rentalData.labourCost);
   const totalAmount = baseAmount + transportCost + labourCost;
-  const outstandingAmount = (rentalData.Billings || []).reduce((sum: number, b: any) => {
+  const outstandingAmount = (rentalData.Billings || []).reduce((sum: number, b) => {
     if (b.status === 'paid') return sum;
     return sum + num(b.amount);
   }, 0);
 
   return {
-    ...rentalData,
+    ...toJsonSafe(rentalData),
     baseAmount,
     transportCost,
     labourCost,
@@ -133,7 +161,7 @@ export const RentalService = {
   async getAllRentals(filters: { customerId?: string; status?: string }) {
     const conds = [];
     if (filters.customerId) conds.push(eq(rentals.customerId, parseInt(filters.customerId, 10)));
-    if (filters.status) conds.push(eq(rentals.status, filters.status as any));
+    if (filters.status) conds.push(eq(rentals.status, filters.status as RentalStatus));
 
     const rows = await db.query.rentals.findMany({
       where: conds.length ? and(...conds) : undefined,
@@ -291,7 +319,11 @@ export const RentalService = {
           .where(inArray(inventoryUnits.id, a.unitIds));
       }
 
-      return loadRentalAggregate(created.id);
+      const createdRental = await loadRentalAggregateTx(tx, created.id);
+      if (!createdRental) {
+        throw new Error('Failed to load created rental.');
+      }
+      return enrich(createdRental);
     });
   },
 
@@ -494,7 +526,11 @@ export const RentalService = {
 
       await tx.update(rentals).set(updateValues).where(eq(rentals.id, rental.id));
 
-      return loadRentalAggregate(rental.id);
+      const updatedRental = await loadRentalAggregateTx(tx, rental.id);
+      if (!updatedRental) {
+        throw new Error('Failed to load updated rental.');
+      }
+      return enrich(updatedRental);
     });
   },
 

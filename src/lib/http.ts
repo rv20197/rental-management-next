@@ -2,8 +2,30 @@ import { getSession } from '@/lib/auth/session';
 import type { SessionClaims } from '@/lib/auth/jwt';
 import { ensureDbReady } from '@/lib/db/setup';
 
+function toJsonSafe(body: unknown): unknown {
+  if (body == null) return body;
+  if (body instanceof Date) return body.toISOString();
+  if (typeof body === 'bigint') return body.toString();
+  if (Array.isArray(body)) return body.map((item) => toJsonSafe(item));
+  if (typeof body === 'object') {
+    if (typeof (body as { toJSON?: unknown }).toJSON === 'function') {
+      return toJsonSafe((body as { toJSON: () => unknown }).toJSON());
+    }
+    if (body instanceof Map) {
+      return Object.fromEntries(Array.from(body.entries(), ([key, value]) => [String(key), toJsonSafe(value)]));
+    }
+    if (body instanceof Set) {
+      return Array.from(body.values(), (value) => toJsonSafe(value));
+    }
+    return Object.fromEntries(
+      Object.entries(body).map(([key, value]) => [key, toJsonSafe(value)]),
+    );
+  }
+  return body;
+}
+
 export function json(body: unknown, init?: ResponseInit): Response {
-  return Response.json(body as Record<string, unknown>, init);
+  return Response.json(toJsonSafe(body) ?? null, init);
 }
 
 export function jsonError(message: string, status = 500): Response {

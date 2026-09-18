@@ -4,9 +4,9 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // Opt pdfkit out of bundling so its font files can be read properly
   serverExternalPackages: ['pdfkit'],
-  
+
   turbopack: {
-    root: path.join(__dirname),
+    root: path.resolve(__dirname),
   },
   // Ship the drizzle/ migrations folder with the serverless bundle so
   // ensureDbReady() can run pending migrations at request time. Without

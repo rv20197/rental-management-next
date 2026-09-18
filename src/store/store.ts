@@ -5,10 +5,12 @@ import { authApi } from '@/api/authApi';
 import { customerApi } from '@/api/customerApi';
 import { itemApi } from '@/api/itemApi';
 import { billingApi } from '@/api/billingApi';
+import uiReducer from './uiSlice';
 
 export const makeStore = () => {
   const store = configureStore({
     reducer: {
+      ui: uiReducer,
       [rentalApi.reducerPath]: rentalApi.reducer,
       [authApi.reducerPath]: authApi.reducer,
       [customerApi.reducerPath]: customerApi.reducer,
