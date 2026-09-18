@@ -284,6 +284,13 @@ export default function RentalsPage() {
   const { data: allItems = [] } = useGetItemsQuery();
   const { data: allCustomers = [] } = useGetCustomersQuery();
 
+  const resolveDepositValue = (manualValue: string, fallbackValue: number) => {
+    const trimmed = manualValue.trim();
+    if (trimmed === '') return fallbackValue;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
+  };
+
   const [newOpen, setNewOpen] = useState(false);
   const [newCustomerId, setNewCustomerId] = useState<number | ''>('');
   const [newItems, setNewItems] = useState<
@@ -514,7 +521,7 @@ export default function RentalsPage() {
               unitPrice: it.unitPrice === '' || it.unitPrice == null ? undefined : Number(it.unitPrice),
             })),
           endDate: editEndDate,
-          depositAmount: editDepositAmount === '' ? undefined : Number(editDepositAmount),
+          depositAmount: resolveDepositValue(editDepositAmount, editTotals.deposit),
           labourCost: editLabourCost === '' ? undefined : Number(editLabourCost),
           transportCost: editTransportCost === '' ? undefined : Number(editTransportCost),
           address: editAddress.trim() === '' ? null : editAddress.trim(),
@@ -560,6 +567,17 @@ export default function RentalsPage() {
     [newItems, newStartDate, newEndDate, itemsById],
   );
 
+  const newEffectiveDeposit = useMemo(
+    () => resolveDepositValue(newDepositAmount, newTotals.deposit),
+    [newDepositAmount, newTotals.deposit],
+  );
+
+  const newGrandTotal = useMemo(() => {
+    const labour = Number(newLabourCost) || 0;
+    const transport = Number(newTransportCost) || 0;
+    return newTotals.rent + newEffectiveDeposit + labour + transport;
+  }, [newLabourCost, newTransportCost, newEffectiveDeposit, newTotals.rent]);
+
   const editRentalData = useMemo(
     () => allRentals.find((r) => r.id === editRentalId),
     [allRentals, editRentalId],
@@ -570,10 +588,20 @@ export default function RentalsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editItems, editRentalData, editEndDate, itemsById]);
 
+  const editEffectiveDeposit = useMemo(
+    () => resolveDepositValue(editDepositAmount, editTotals.deposit),
+    [editDepositAmount, editTotals.deposit],
+  );
+
+  const editGrandTotal = useMemo(() => {
+    const labour = Number(editLabourCost) || 0;
+    const transport = Number(editTransportCost) || 0;
+    return editTotals.rent + editEffectiveDeposit + labour + transport;
+  }, [editLabourCost, editTransportCost, editEffectiveDeposit, editTotals.rent]);
+
   const handleCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const depositStr = newDepositAmount.trim();
-    const parsedDeposit = depositStr === '' ? undefined : Number(depositStr);
+    const effectiveDeposit = resolveDepositValue(newDepositAmount, newTotals.deposit);
     const labourCostStr = newLabourCost.trim();
     const parsedLabourCost = labourCostStr === '' ? undefined : Number(labourCostStr);
     const transportCostStr = newTransportCost.trim();
@@ -599,7 +627,7 @@ export default function RentalsPage() {
         startDate: newStartDate,
         endDate: newEndDate,
       };
-      if (parsedDeposit != null) payload.depositAmount = parsedDeposit;
+      payload.depositAmount = effectiveDeposit;
       if (parsedLabourCost != null) payload.labourCost = parsedLabourCost;
       if (parsedTransportCost != null) payload.transportCost = parsedTransportCost;
       if (newAddress.trim() !== '') payload.address = newAddress.trim();
@@ -1219,11 +1247,11 @@ export default function RentalsPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setNewDepositAmount(v);
-                  setIsNewDepositOverridden(v.trim() !== '');
+                  setIsNewDepositOverridden(v.trim() !== '' && Number(v) > 0);
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Leave blank to use auto-calculated deposit of ₹{newTotals.deposit.toFixed(2)}.
+                Leave blank or set to 0 to use auto-calculated deposit of ₹{newTotals.deposit.toFixed(2)}.
               </p>
             </div>
 
@@ -1264,11 +1292,11 @@ export default function RentalsPage() {
               </div>
               <div className="flex justify-between text-sm font-medium">
                 <span>Total Security Deposit</span>
-                <span>₹{newTotals.deposit.toFixed(2)}</span>
+                <span>₹{newEffectiveDeposit.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-base font-bold pt-1 border-t">
                 <span>Grand Total (Rent + Deposit)</span>
-                <span>₹{newTotals.total.toFixed(2)}</span>
+                <span>₹{newGrandTotal.toFixed(2)}</span>
               </div>
             </div>
 
@@ -1454,11 +1482,11 @@ export default function RentalsPage() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setEditDepositAmount(v);
-                  setIsEditDepositOverridden(v.trim() !== '');
+                  setIsEditDepositOverridden(v.trim() !== '' && Number(v) > 0);
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Leave blank to use auto-calculated deposit of ₹{editTotals.deposit.toFixed(2)}.
+                Leave blank or set to 0 to use auto-calculated deposit of ₹{editTotals.deposit.toFixed(2)}.
               </p>
             </div>
 
@@ -1503,11 +1531,11 @@ export default function RentalsPage() {
               </div>
               <div className="flex justify-between text-sm font-medium">
                 <span>Total Security Deposit</span>
-                <span>₹{editTotals.deposit.toFixed(2)}</span>
+                <span>₹{editEffectiveDeposit.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-base font-bold pt-1 border-t">
                 <span>Grand Total (Rent + Deposit)</span>
-                <span>₹{editTotals.total.toFixed(2)}</span>
+                <span>₹{editGrandTotal.toFixed(2)}</span>
               </div>
             </div>
 

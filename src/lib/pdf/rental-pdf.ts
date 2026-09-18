@@ -235,26 +235,31 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       const damagesCost = Number(parseFloat(billing.damagesCost || billing.Rental?.damagesCost) || 0);
       const depositAmount = Number(parseFloat(billing.depositAmount) || 0);
 
-      if (labourCost > 0) {
-        doc.font('Helvetica').fontSize(10).text('Labour Cost:', summaryLabelX, y, { width: 300, lineBreak: false });
-        doc.font('Helvetica').fontSize(10).text(formatCurrency(labourCost), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
-        y += 20;
-      }
+      doc.font('Helvetica').fontSize(10).text('Base Amount:', summaryLabelX, y, { width: 300, lineBreak: false });
+      doc.font('Helvetica').fontSize(10).text(formatCurrency(rentalCharges), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
+      y += 20;
+
       if (transportCost > 0) {
         doc.font('Helvetica').fontSize(10).text('Transport Cost:', summaryLabelX, y, { width: 300, lineBreak: false });
         doc.font('Helvetica').fontSize(10).text(formatCurrency(transportCost), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
         y += 20;
       }
+      if (labourCost > 0) {
+        doc.font('Helvetica').fontSize(10).text('Labour Cost:', summaryLabelX, y, { width: 300, lineBreak: false });
+        doc.font('Helvetica').fontSize(10).text(formatCurrency(labourCost), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
+        y += 20;
+      }
       if (depositAmount > 0) {
-        doc.font('Helvetica').fontSize(10).text('Deposit Amount:', summaryLabelX, y, { width: 300, lineBreak: false });
-        doc.font('Helvetica').fontSize(10).text(formatCurrency(depositAmount), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
+        doc.font('Helvetica').fontSize(10).fillColor('#2563eb').text('Deposit Collected:', summaryLabelX, y, { width: 300, lineBreak: false });
+        doc.font('Helvetica').fontSize(10).fillColor('#2563eb').text(formatCurrency(depositAmount), summaryValueX, y, { width: summaryValueW, align: 'right', lineBreak: false });
+        doc.fillColor('#444444');
         y += 20;
       }
 
       y += 6;
 
       const totalDue = isEstimation
-        ? rentalCharges + labourCost + transportCost + depositAmount
+        ? rentalCharges + labourCost + transportCost
         : rentalCharges + returnLabourCost + returnTransportCost + damagesCost;
 
       doc.font('Helvetica-Bold').fontSize(11).text('Total Due:', summaryLabelX, y, { width: 300, lineBreak: false });

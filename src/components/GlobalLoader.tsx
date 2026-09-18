@@ -10,10 +10,8 @@ export function GlobalLoader() {
   if (!isLoading) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
-      <div className="rounded-xl bg-white p-4 shadow-lg dark:bg-neutral-900">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
+    <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+        <Loader2 className="h-16 w-16 animate-spin text-[primary]" />
     </div>
   );
 }
