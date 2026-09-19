@@ -37,6 +37,7 @@ export interface Rental {
   createdAt?: string;
   Item?: Item;
   RentalItems?: RentalItem[];
+  Billings?: { createdAt?: string; returnedQuantity?: number | null }[];
   Customer?: Customer;
 }
 

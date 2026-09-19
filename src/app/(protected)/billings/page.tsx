@@ -49,11 +49,11 @@ const BillingRow = React.memo(function BillingRow({
   onPay: (id: number) => void;
   onView: (billing: any) => void;
 }) {
-  const handleDownload = async () => {
+  const handleDownloadInvoice = async () => {
     try {
-      await downloadAttachment(`/api/billings/${billing.id}/download`, `bill-${billing.id}.pdf`);
+      await downloadAttachment(`/api/billings/${billing.id}/download`, `invoice-${billing.id}.pdf`);
     } catch {
-      toast.error('Failed to download bill');
+      toast.error('Failed to download invoice');
     }
   };
 
@@ -98,8 +98,8 @@ const BillingRow = React.memo(function BillingRow({
             size="icon-xs"
             variant="ghost"
             className="text-blue-600"
-            title="Download PDF"
-            onClick={handleDownload}
+            title="Download Invoice"
+            onClick={handleDownloadInvoice}
           >
             <Download className="size-3" />
           </Button>
@@ -227,7 +227,8 @@ export default function BillingsPage() {
         setAvailableDeposit(Number(selectedRental.depositAmount) || 0);
         if (selectedRental.RentalItems && selectedRental.RentalItems.length > 0) {
           const populatedItems = selectedRental.RentalItems.map((ri) => {
-            const monthlyRate = ri.Item?.monthlyRate ? Number(ri.Item.monthlyRate) : 0;
+            const monthlyRate =
+              ri.unitPrice != null ? Number(ri.unitPrice) : ri.Item?.monthlyRate ? Number(ri.Item.monthlyRate) : 0;
             return {
               itemId: ri.itemId,
               quantity: ri.quantity,
@@ -453,7 +454,7 @@ export default function BillingsPage() {
                       }}
                     />
                     <SortableTableHead
-                      label="End Date"
+                      label="Due Date"
                       isActive={sortKey === 'dueDate'}
                       direction={sortDirection}
                       onClick={() => {
@@ -836,8 +837,8 @@ export default function BillingsPage() {
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Billing Details - Bill #{selectedBilling?.id}</DialogTitle>
-            <DialogDescription>Detailed view of the bill and its line items.</DialogDescription>
+            <DialogTitle>Rental Invoice - Invoice #{selectedBilling?.id}</DialogTitle>
+            <DialogDescription>Detailed view of the invoice and its line items.</DialogDescription>
           </DialogHeader>
           {selectedBilling && (
             <div className="space-y-6 py-4">
@@ -860,6 +861,33 @@ export default function BillingsPage() {
                   <p className="text-muted-foreground">Due Date</p>
                   <p className="font-semibold">{new Date(selectedBilling.dueDate).toLocaleDateString()}</p>
                 </div>
+                {selectedBilling.Rental?.startDate && selectedBilling.Rental?.endDate && (
+                  <div>
+                    <p className="text-muted-foreground">Billing Period</p>
+                    <p className="font-semibold">
+                      {new Date(selectedBilling.Rental.startDate).toLocaleDateString('en-IN')} to{' '}
+                      {new Date(selectedBilling.Rental.endDate).toLocaleDateString('en-IN')}
+                    </p>
+                  </div>
+                )}
+                {(selectedBilling.returnedQuantity != null || selectedBilling.Rental?.status === 'returned') && (
+                  <>
+                    {selectedBilling.Rental?.endDate && (
+                      <div>
+                        <p className="text-muted-foreground">End Date</p>
+                        <p className="font-semibold">
+                          {new Date(selectedBilling.Rental.endDate).toLocaleDateString('en-IN')}
+                        </p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-muted-foreground">Return Date</p>
+                      <p className="font-semibold">
+                        {new Date(selectedBilling.returnDate || selectedBilling.createdAt).toLocaleDateString('en-IN')}
+                      </p>
+                    </div>
+                  </>
+                )}
                 <div>
                   <p className="text-muted-foreground">Status</p>
                   <span

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { rentals } from '@/lib/db/schema';
 import { calculateMonthsRented } from '@/lib/billing/months';
-import { generateRentalPdf } from '@/lib/pdf/rental-pdf';
+import { generateRentalEstimationPdf } from '@/lib/pdf/rental-estimation-pdf';
 import { jsonError, requireAuth } from '@/lib/http';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -68,7 +68,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     availableDeposit: depositAmount,
   };
 
-  const { buffer, filename } = await generateRentalPdf(mockBilling);
+  const { buffer, filename } = await generateRentalEstimationPdf(mockBilling);
   return new Response(new Uint8Array(buffer), {
     status: 200,
     headers: {

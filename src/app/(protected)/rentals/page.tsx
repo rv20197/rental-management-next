@@ -330,6 +330,9 @@ export default function RentalsPage() {
   const [selectedRental, setSelectedRental] = useState<Rental | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [isNewlyCreated, setIsNewlyCreated] = useState(false);
+  const hasReturnedItems =
+    selectedRental?.status === 'returned' || (selectedRental?.returnedQuantity ?? 0) > 0;
+  const returnBilling = selectedRental?.Billings?.find((billing) => billing.returnedQuantity != null);
 
   const handleView = (rental: Rental) => {
     setSelectedRental(rental);
@@ -744,7 +747,7 @@ export default function RentalsPage() {
                       }}
                     />
                     <SortableTableHead
-                      label="Start Date"
+                      label="Rental Start Date"
                       isActive={sortKey === 'startDate'}
                       direction={sortDirection}
                       onClick={() => {
@@ -1192,7 +1195,7 @@ export default function RentalsPage() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="start">Start Date</Label>
+                <Label htmlFor="start">Rental Start Date</Label>
                 <Input
                   id="start"
                   type="date"
@@ -1433,7 +1436,7 @@ export default function RentalsPage() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="start-edit">Start Date (Read-only)</Label>
+                <Label htmlFor="start-edit">Rental Start Date (Read-only)</Label>
                 <Input
                   id="start-edit"
                   type="date"
@@ -1593,15 +1596,32 @@ export default function RentalsPage() {
                   </span>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Start Date</p>
+                  <p className="text-muted-foreground">Rental Start Date</p>
                   <p className="font-semibold">{new Date(selectedRental.startDate).toLocaleDateString()}</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">End Date</p>
-                  <p className="font-semibold">
-                    {selectedRental.endDate ? new Date(selectedRental.endDate).toLocaleDateString() : 'N/A'}
-                  </p>
-                </div>
+                {hasReturnedItems && (
+                  <div>
+                    <p className="text-muted-foreground">End Date</p>
+                    <p className="font-semibold">
+                      {selectedRental.endDate ? new Date(selectedRental.endDate).toLocaleDateString() : 'N/A'}
+                    </p>
+                  </div>
+                )}
+                {hasReturnedItems && returnBilling?.createdAt && (
+                  <div>
+                    <p className="text-muted-foreground">Return Date</p>
+                    <p className="font-semibold">{new Date(returnBilling.createdAt).toLocaleDateString('en-IN')}</p>
+                  </div>
+                )}
+                {selectedRental.startDate && selectedRental.endDate && (
+                  <div>
+                    <p className="text-muted-foreground">Billing Period</p>
+                    <p className="font-semibold">
+                      {new Date(selectedRental.startDate).toLocaleDateString('en-IN')} to{' '}
+                      {new Date(selectedRental.endDate).toLocaleDateString('en-IN')}
+                    </p>
+                  </div>
+                )}
                 {(selectedRental.address || selectedRental.Customer?.address) ? (
                   <div className="col-span-2">
                     <p className="text-muted-foreground">Address</p>

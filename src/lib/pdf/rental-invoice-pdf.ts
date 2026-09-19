@@ -1,81 +1,42 @@
 import PDFDocument from 'pdfkit';
+import {
+  MARGIN,
+  RIGHT_EDGE,
+  COL_ITEM_X,
+  COL_ITEM_W,
+  COL_DATE_X,
+  COL_DATE_W,
+  COL_RATE_X,
+  COL_RATE_W,
+  COL_QTY_X,
+  COL_QTY_W,
+  COL_TOTAL_X,
+  COL_TOTAL_W,
+  SELLER_COMPANY,
+  SELLER_ADDRESS,
+  SELLER_PHONE,
+  formatCurrency,
+  formatDate,
+  drawStatusBadge,
+  checkPageBreak,
+  safeFilenamePart,
+  type PdfResult,
+} from './pdfShared';
 
-const MARGIN = 50;
-const PAGE_WIDTH = 595;
-const PAGE_HEIGHT = 842;
-const RIGHT_EDGE = PAGE_WIDTH - MARGIN;
-const COL_ITEM_X = 50;
-const COL_ITEM_W = 160;
-const COL_DATE_X = 210;
-const COL_DATE_W = 80;
-const COL_RATE_X = 290;
-const COL_RATE_W = 80;
-const COL_QTY_X = 370;
-const COL_QTY_W = 50;
-const COL_TOTAL_X = 420;
-const COL_TOTAL_W = 110;
+export type RentalInvoicePdfResult = PdfResult;
 
-const formatCurrency = (value: unknown): string => {
-  const num = Number(parseFloat(String(value)) || 0);
-  return 'Rs. ' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
-
-const formatDate = (dateVal: unknown): string => {
-  const date = new Date(dateVal as string | number | Date);
-  return date.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-};
-
-const drawStatusBadge = (
-  doc: InstanceType<typeof PDFDocument>,
-  status: string,
-  x: number,
-  y: number,
-) => {
-  const statusUpper = status.toUpperCase();
-  const badgeColors: Record<string, string | { bg: string; fg: string }> = {
-    PAID: { bg: '#10b981', fg: '#ffffff' },
-    PENDING: '#f59e0b',
-    RETURNED: '#9ca3af',
-  };
-  const colors = badgeColors[statusUpper] || badgeColors.PENDING;
-
-  if (typeof colors === 'object') {
-    doc.rect(x - 5, y - 3, 60, 16).fill(colors.bg);
-    doc.fillColor(colors.fg);
-  } else {
-    doc.rect(x - 5, y - 3, 60, 16).fill(colors);
-    doc.fillColor('#ffffff');
-  }
-
-  doc.fontSize(9).font('Helvetica-Bold').text(statusUpper, x, y, { width: 60 });
-  doc.fillColor('#444444').font('Helvetica');
-};
-
-const checkPageBreak = (
-  doc: InstanceType<typeof PDFDocument>,
-  currentY: number,
-  neededSpace: number,
-): number => {
-  if (currentY + neededSpace > PAGE_HEIGHT - MARGIN) {
-    doc.addPage();
-    return MARGIN + 20;
-  }
-  return currentY;
-};
-
-const safeFilenamePart = (raw: unknown): string =>
-  String(raw || '').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) || 'Customer';
-
-export interface RentalPdfResult {
-  buffer: Buffer;
-  filename: string;
-}
-
-export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
+/**
+ * Rental Invoice PDF - generated for billing records, before or after return.
+ * Always shows "Rental Invoice" / "Invoice #" and a dynamic Billing Period
+ * (rental start date to rental end date). The End Date and Return Date rows
+ * only appear once items have actually been returned.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function generateRentalInvoicePdf(billing: any): Promise<RentalInvoicePdfResult> {
   return new Promise((resolve, reject) => {
     try {
-      const isEstimation = billing.returnedQuantity == null;
-      const docTitle = isEstimation ? 'RENTAL ESTIMATION' : 'RENTAL BILL';
+      const hasBeenReturned = billing.returnedQuantity != null || billing.Rental?.status === 'returned';
+      const docTitle = 'RENTAL INVOICE';
 
       const doc = new PDFDocument({ margin: MARGIN, size: 'A4' });
       const chunks: Buffer[] = [];
@@ -87,15 +48,11 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
           ? `${safeFilenamePart(customer.firstName)}_${safeFilenamePart(customer.lastName)}`
           : 'Customer';
         const dateStr = new Date(billing.createdAt || new Date()).toISOString().split('T')[0];
-        const type = isEstimation ? 'Estimate' : 'Bill';
-        const filename = `${customerName}_${dateStr}_${type}.pdf`;
+        const filename = `${customerName}_${dateStr}_Invoice.pdf`;
         resolve({ buffer: Buffer.concat(chunks), filename });
       });
 
-      const sellerCompany = process.env.FROM_NAME || 'Rental Management';
-      const sellerAddress =
-        'Gala.no. 08, Haria Industrial Estate, Behind Universal Petrol Pump, Next to Capitol Hotel, Majiwada, Thane (W) - 400608.';
-      const sellerPhone = '+91-9821509815';
+      const sellerCompany = SELLER_COMPANY();
       const customer = billing.Rental?.Customer || billing.Customer;
 
       let y = MARGIN;
@@ -104,25 +61,41 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       y += 25;
 
       doc.fontSize(9).font('Helvetica').fillColor('#555555');
-      doc.text(sellerAddress, MARGIN, y, { width: 250 });
+      doc.text(SELLER_ADDRESS, MARGIN, y, { width: 250 });
       y += 40;
-      doc.text(`Phone: ${sellerPhone}`, MARGIN, y, { lineBreak: false });
+      doc.text(`Phone: ${SELLER_PHONE}`, MARGIN, y, { lineBreak: false });
       y += 15;
 
       const rightColX = 330;
       doc.fontSize(16).font('Helvetica-Bold').fillColor('#000000').text(docTitle, rightColX, MARGIN, { lineBreak: false });
       doc.fontSize(10).font('Helvetica').fillColor('#444444');
-      doc.text(`${isEstimation ? 'Estimation' : 'Bill'} #${billing.id}`, rightColX, MARGIN + 22, { lineBreak: false });
+      doc.text(`Invoice #${billing.id}`, rightColX, MARGIN + 22, { lineBreak: false });
       doc.text(`Date: ${formatDate(billing.createdAt)}`, rightColX, MARGIN + 37, { lineBreak: false });
       doc.text(`Due: ${formatDate(billing.dueDate)}`, rightColX, MARGIN + 52, { lineBreak: false });
 
       const startDate = billing.Rental?.startDate;
       const endDate = billing.Rental?.endDate;
-      if (startDate) doc.text(`Start Date: ${formatDate(startDate)}`, rightColX, MARGIN + 67, { lineBreak: false });
-      if (endDate) doc.text(`End Date: ${formatDate(endDate)}`, rightColX, MARGIN + 82, { lineBreak: false });
-      else if (isEstimation) doc.text(`End Date: N/A`, rightColX, MARGIN + 82, { lineBreak: false });
+      let dateY = MARGIN + 67;
+      if (startDate) {
+        doc.text(`Rental Start Date: ${formatDate(startDate)}`, rightColX, dateY, { lineBreak: false });
+        dateY += 15;
+      }
+      if (startDate && endDate) {
+        doc.text(`Billing Period: ${formatDate(startDate)} to ${formatDate(endDate)}`, rightColX, dateY, {
+          lineBreak: false,
+        });
+        dateY += 15;
+      }
+      if (hasBeenReturned && endDate) {
+        doc.text(`End Date: ${formatDate(endDate)}`, rightColX, dateY, { lineBreak: false });
+        dateY += 15;
+        doc.text(`Return Date: ${formatDate(billing.returnDate || billing.createdAt)}`, rightColX, dateY, {
+          lineBreak: false,
+        });
+        dateY += 15;
+      }
 
-      const badgeY = endDate ? MARGIN + 97 : MARGIN + 67;
+      const badgeY = dateY;
       drawStatusBadge(doc, billing.status || 'PENDING', rightColX, badgeY);
       y = Math.max(y, badgeY + 20);
 
@@ -165,7 +138,9 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       doc.rect(MARGIN, headerY, RIGHT_EDGE - MARGIN, 18).fill('#333333');
 
       doc.fillColor('#ffffff').text('Item Name', COL_ITEM_X + 2, headerY + 3, { width: COL_ITEM_W, lineBreak: false });
-      doc.text('Return Date', COL_DATE_X, headerY + 3, { width: COL_DATE_W, align: 'right', lineBreak: false });
+      if (hasBeenReturned) {
+        doc.text('Return Date', COL_DATE_X, headerY + 3, { width: COL_DATE_W, align: 'right', lineBreak: false });
+      }
       doc.text('Monthly Rate', COL_RATE_X, headerY + 3, { width: COL_RATE_W, align: 'right', lineBreak: false });
       doc.text('Quantity', COL_QTY_X, headerY + 3, { width: COL_QTY_W, align: 'right', lineBreak: false });
       doc.text('Total Amount', COL_TOTAL_X, headerY + 3, { width: COL_TOTAL_W, align: 'right', lineBreak: false });
@@ -176,6 +151,7 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       let rowBgColor = true;
 
       if (billing.BillingItems && billing.BillingItems.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         billing.BillingItems.forEach((bi: any) => {
           if (rowBgColor) {
             doc.rect(MARGIN, y - 3, RIGHT_EDGE - MARGIN, 16).fill('#f9f9f9');
@@ -184,13 +160,9 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
 
           doc.fillColor('#444444').font('Helvetica');
           const itemName = bi.Item?.name || bi.description || 'Unknown Item';
-          const itemDate = bi.createdAt
-            ? formatDate(bi.createdAt)
-            : billing.Rental?.endDate
-              ? formatDate(billing.Rental.endDate)
-              : isEstimation
-                ? 'Est. Date'
-                : 'N/A';
+          const itemDate = hasBeenReturned && (bi.createdAt || billing.returnDate || billing.createdAt)
+            ? formatDate(bi.createdAt || billing.returnDate || billing.createdAt)
+            : '';
           doc.text(itemName, COL_ITEM_X + 2, y, { width: COL_ITEM_W, lineBreak: false });
           doc.text(itemDate, COL_DATE_X, y, { width: COL_DATE_W, align: 'right', lineBreak: false });
           doc.text(formatCurrency(bi.rate || 0), COL_RATE_X, y, { width: COL_RATE_W, align: 'right', lineBreak: false });
@@ -218,6 +190,7 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
 
       let rentalCharges = 0;
       if (billing.BillingItems && billing.BillingItems.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         rentalCharges = billing.BillingItems.reduce((sum: number, bi: any) => {
           const itemTotal = Number(
             parseFloat(bi.total) || parseFloat(bi.rate || 0) * parseInt(bi.quantity || 0),
@@ -258,7 +231,7 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
 
       y += 6;
 
-      const totalDue = isEstimation
+      const totalDue = !hasBeenReturned
         ? rentalCharges + labourCost + transportCost
         : rentalCharges + returnLabourCost + returnTransportCost + damagesCost;
 
@@ -285,7 +258,7 @@ export function generateRentalPdf(billing: any): Promise<RentalPdfResult> {
       y += 15;
 
       doc.fontSize(8).font('Helvetica').fillColor('#999999').text(
-        'Thank you for your business! For queries contact +91-9821509815',
+        `Thank you for your business! For queries contact ${SELLER_PHONE}`,
         MARGIN,
         y,
         { align: 'center', width: RIGHT_EDGE - MARGIN },
