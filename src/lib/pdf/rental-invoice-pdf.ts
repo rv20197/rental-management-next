@@ -22,14 +22,46 @@ import {
   safeFilenamePart,
   type PdfResult,
 } from './pdfShared';
+import {
+  calculateBillPeriodEndDate,
+  calculateBillPeriodDays,
+  getBillPeriodOptionByValue,
+  normalizeBillPeriodMonths,
+  CUSTOM_BILL_PERIOD_VALUE,
+} from '../billing/period';
 
 export type RentalInvoicePdfResult = PdfResult;
 
 /**
+ * Resolves the display label, start/end dates, and duration for a billing's
+ * Bill Period, tolerating both enriched billings (which already carry
+ * `billPeriodValue`/`billingEndDate`/`billingDurationDays`) and legacy/raw
+ * rows that only have `dueDate` + `billPeriodMonths`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function resolveBillPeriodDisplay(billing: any) {
+  const billingStartDate: string | null = billing.billingStartDate ?? billing.dueDate ?? null;
+  const billPeriodMonths = normalizeBillPeriodMonths(billing.billPeriodMonths);
+  const billPeriodValue: string =
+    billing.billPeriodValue ??
+    (billing.billPeriodType === 'custom' ? CUSTOM_BILL_PERIOD_VALUE : String(billPeriodMonths));
+  const billingEndDate: string | null =
+    billing.billingEndDate ?? (billingStartDate ? calculateBillPeriodEndDate(billingStartDate, billPeriodMonths) : null);
+  const billingDurationDays =
+    billing.billingDurationDays ??
+    (billingStartDate && billingEndDate ? calculateBillPeriodDays(billingStartDate, billingEndDate) : null);
+  const option = getBillPeriodOptionByValue(billPeriodValue);
+  const label = option ? option.label : 'Custom Dates';
+  return { billingStartDate, billingEndDate, billingDurationDays, label };
+}
+
+/**
  * Rental Invoice PDF - generated for billing records, before or after return.
- * Always shows "Rental Invoice" / "Invoice #" and a dynamic Billing Period
- * (rental start date to rental end date). The End Date and Return Date rows
- * only appear once items have actually been returned.
+ * Always shows "Rental Invoice" / "Invoice #", the Bill Period (predefined
+ * label or Custom Dates) with its Billing Start/End Date and duration, and
+ * the overall Rental Duration (rental item start date to end date). The
+ * rental item's End Date and Return Date rows only appear once items have
+ * actually been returned.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function generateRentalInvoicePdf(billing: any): Promise<RentalInvoicePdfResult> {
@@ -71,17 +103,30 @@ export function generateRentalInvoicePdf(billing: any): Promise<RentalInvoicePdf
       doc.fontSize(10).font('Helvetica').fillColor('#444444');
       doc.text(`Invoice #${billing.id}`, rightColX, MARGIN + 22, { lineBreak: false });
       doc.text(`Date: ${formatDate(billing.createdAt)}`, rightColX, MARGIN + 37, { lineBreak: false });
-      doc.text(`Due: ${formatDate(billing.dueDate)}`, rightColX, MARGIN + 52, { lineBreak: false });
+
+      const billPeriod = resolveBillPeriodDisplay(billing);
+      let dateY = MARGIN + 52;
+      doc.text(`Bill Period: ${billPeriod.label}`, rightColX, dateY, { lineBreak: false });
+      dateY += 15;
+      doc.text(`Billing Start Date: ${formatDate(billPeriod.billingStartDate)}`, rightColX, dateY, { lineBreak: false });
+      dateY += 15;
+      doc.text(`Billing End Date: ${formatDate(billPeriod.billingEndDate)}`, rightColX, dateY, { lineBreak: false });
+      dateY += 15;
+      if (billPeriod.billingDurationDays != null) {
+        doc.text(`Billing Duration: ${billPeriod.billingDurationDays} days`, rightColX, dateY, { lineBreak: false });
+        dateY += 15;
+      }
+      doc.text(`Due: ${formatDate(billing.dueDate)}`, rightColX, dateY, { lineBreak: false });
+      dateY += 15;
 
       const startDate = billing.Rental?.startDate;
       const endDate = billing.Rental?.endDate;
-      let dateY = MARGIN + 67;
       if (startDate) {
         doc.text(`Rental Start Date: ${formatDate(startDate)}`, rightColX, dateY, { lineBreak: false });
         dateY += 15;
       }
       if (startDate && endDate) {
-        doc.text(`Billing Period: ${formatDate(startDate)} to ${formatDate(endDate)}`, rightColX, dateY, {
+        doc.text(`Rental Duration: ${formatDate(startDate)} to ${formatDate(endDate)}`, rightColX, dateY, {
           lineBreak: false,
         });
         dateY += 15;

@@ -11,10 +11,18 @@ import {
 } from '@/lib/db/schema';
 import { calculateMonthsRented } from '@/lib/billing/months';
 import { calculateBillingTotals } from '@/lib/billing/calculations';
-import { calculateBillPeriodEndDate, normalizeBillPeriodMonths } from '@/lib/billing/period';
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
+import {
+  CUSTOM_BILL_PERIOD_VALUE,
+  DEFAULT_BILL_PERIOD_MONTHS,
+  type BillPeriodType,
+  calculateBillPeriodDays,
+  calculateBillPeriodEndDate,
+  calculateCalendarMonthsEquivalent,
+  getBillPeriodOptionByValue,
+  matchPredefinedBillPeriod,
+  normalizeBillPeriodMonths,
+  validateBillingDateRange,
+} from '@/lib/billing/period';
 const num = (v: unknown, fallback = 0): number => {
   if (v == null || v === '') return fallback;
   const n = Number(v);
@@ -25,8 +33,13 @@ interface CreateBillingPayload {
   rentalId?: number;
   customerId?: number;
   amount?: number | string;
+  /** Billing Start Date (historically also the payment Due Date). */
   dueDate?: string;
-  /** Bill Period length, in months, from `dueDate`. Defaults to 1. */
+  /** Bill Period selector value: '1' | '2' | '3' | '6' | '12' | 'custom'. Preferred over `billPeriodMonths`. */
+  billPeriodValue?: string;
+  /** Billing End Date. Required when `billPeriodValue` is 'custom'; auto-calculated from `dueDate` otherwise unless explicitly overridden. */
+  billingEndDate?: string;
+  /** @deprecated Legacy raw Bill Period length, in months, from `dueDate`. Defaults to 1. Prefer `billPeriodValue`. */
   billPeriodMonths?: number | string;
   status?: string;
   paymentDate?: string;
@@ -38,6 +51,103 @@ interface CreateBillingPayload {
 }
 
 type UpdateBillingPayload = CreateBillingPayload;
+
+interface ExistingPeriodFields {
+  dueDate: string;
+  billPeriodType: string;
+  billPeriodMonths: string;
+  billingEndDate: string | null;
+}
+
+interface ResolvedBillingPeriod {
+  dueDate: string;
+  billPeriodType: BillPeriodType;
+  billPeriodMonths: number;
+  billingEndDate: string;
+}
+
+/**
+ * Resolves the final Billing Start/End Date and Bill Period type/multiplier
+ * for a create/update request. The final dates are the single source of
+ * truth for all billing calculations (see `calculateBillingTotals`).
+ *
+ * - A `billPeriodValue` of a predefined option auto-calculates the End Date
+ *   from the Start Date unless `billingEndDate` is explicitly supplied.
+ * - A `billPeriodValue` of 'custom' (or any explicit `billingEndDate` that
+ *   doesn't match a predefined option) requires/uses the explicit End Date,
+ *   with the recurring-charge multiplier derived via calendar-month
+ *   proration of the actual date range (no fixed days-per-month).
+ * - The legacy `billPeriodMonths` (no `billPeriodValue`) is still supported
+ *   for backward compatibility.
+ * - When neither is supplied on an update, the previously persisted Bill
+ *   Period is reused unchanged, except the End Date is recalculated when
+ *   the Start Date changes and the previous period was predefined (per the
+ *   Start-Date/Bill-Period synchronization rule).
+ */
+function resolveBillingPeriod(
+  payload: CreateBillingPayload,
+  existing?: ExistingPeriodFields | null,
+): ResolvedBillingPeriod {
+  const dueDate = payload.dueDate ?? existing?.dueDate ?? new Date().toISOString().slice(0, 10);
+  let result: ResolvedBillingPeriod;
+
+  if (payload.billPeriodValue != null) {
+    const option = getBillPeriodOptionByValue(payload.billPeriodValue);
+    if (option && option.months != null) {
+      result = {
+        dueDate,
+        billPeriodType: 'predefined',
+        billPeriodMonths: option.months,
+        billingEndDate: payload.billingEndDate ?? calculateBillPeriodEndDate(dueDate, option.months),
+      };
+    } else {
+      if (!payload.billingEndDate) throw new Error('Billing End Date is required for a Custom Dates Bill Period');
+      result = {
+        dueDate,
+        billPeriodType: 'custom',
+        billPeriodMonths: calculateCalendarMonthsEquivalent(dueDate, payload.billingEndDate),
+        billingEndDate: payload.billingEndDate,
+      };
+    }
+  } else if (payload.billPeriodMonths != null) {
+    // Legacy numeric-only payload.
+    const billPeriodMonths = normalizeBillPeriodMonths(payload.billPeriodMonths);
+    const billingEndDate = payload.billingEndDate ?? calculateBillPeriodEndDate(dueDate, billPeriodMonths);
+    const matched = matchPredefinedBillPeriod(dueDate, billingEndDate);
+    result = {
+      dueDate,
+      billPeriodType: matched ? 'predefined' : 'custom',
+      billPeriodMonths,
+      billingEndDate,
+    };
+  } else if (existing) {
+    // Nothing period-related supplied — reuse the previously persisted
+    // period rather than resetting to the default.
+    const billPeriodMonths = normalizeBillPeriodMonths(existing.billPeriodMonths);
+    const billPeriodType: BillPeriodType = existing.billPeriodType === 'custom' ? 'custom' : 'predefined';
+    const startChanged = payload.dueDate != null && payload.dueDate !== existing.dueDate;
+    let billingEndDate = existing.billingEndDate ?? calculateBillPeriodEndDate(existing.dueDate, billPeriodMonths);
+    if (startChanged && billPeriodType === 'predefined') {
+      billingEndDate = calculateBillPeriodEndDate(dueDate, billPeriodMonths);
+    }
+    result = { dueDate, billPeriodType, billPeriodMonths, billingEndDate };
+  } else {
+    result = {
+      dueDate,
+      billPeriodType: 'predefined',
+      billPeriodMonths: DEFAULT_BILL_PERIOD_MONTHS,
+      billingEndDate: calculateBillPeriodEndDate(dueDate, DEFAULT_BILL_PERIOD_MONTHS),
+    };
+  }
+
+  const error = validateBillingDateRange(result.dueDate, result.billingEndDate);
+  if (error) throw new Error(error);
+  return result;
+}
+
+function billPeriodValueOf(billPeriodType: string, billPeriodMonths: unknown): string {
+  return billPeriodType === 'custom' ? CUSTOM_BILL_PERIOD_VALUE : String(normalizeBillPeriodMonths(billPeriodMonths));
+}
 
 interface ReturnAndBillPayload {
   rentalId: number;
@@ -73,7 +183,13 @@ function enrichBilling(b: any) {
   const totalAmount = num(b.amount);
   const baseAmount = totalAmount - labourCost - transportCost;
   const billPeriodMonths = normalizeBillPeriodMonths(b.billPeriodMonths);
-  const billingEndDate = b.dueDate ? calculateBillPeriodEndDate(b.dueDate, billPeriodMonths) : null;
+  const billPeriodType: BillPeriodType = b.billPeriodType === 'custom' ? 'custom' : 'predefined';
+  // Persisted billingEndDate is the source of truth; fall back to a computed
+  // value only for bills created before this column existed.
+  const billingEndDate = b.billingEndDate ?? (b.dueDate ? calculateBillPeriodEndDate(b.dueDate, billPeriodMonths) : null);
+  const billingStartDate = b.dueDate ?? null;
+  const billingDurationDays =
+    billingStartDate && billingEndDate ? calculateBillPeriodDays(billingStartDate, billingEndDate) : null;
   return {
     ...b,
     baseAmount,
@@ -82,8 +198,11 @@ function enrichBilling(b: any) {
     depositAmount: num(b.Rental?.depositAmount),
     totalAmount,
     billPeriodMonths,
-    billingStartDate: b.dueDate ?? null,
+    billPeriodType,
+    billPeriodValue: billPeriodValueOf(billPeriodType, billPeriodMonths),
+    billingStartDate,
     billingEndDate,
+    billingDurationDays,
   };
 }
 
@@ -117,6 +236,8 @@ export const BillingService = {
   async createBilling(payload: CreateBillingPayload) {
     const { items: rawItems, damages, ...billingData } = payload;
 
+    const resolvedPeriod = resolveBillingPeriod(billingData);
+
     const {
       processedItems,
       processedDamages,
@@ -131,7 +252,7 @@ export const BillingService = {
       availableDeposit: billingData.availableDeposit,
       labourCost: billingData.labourCost,
       transportCost: billingData.transportCost,
-      billPeriodMonths: billingData.billPeriodMonths,
+      billPeriodMonths: resolvedPeriod.billPeriodMonths,
     });
 
     return db.transaction(async (tx) => {
@@ -141,8 +262,10 @@ export const BillingService = {
           rentalId: billingData.rentalId ?? null,
           customerId: billingData.customerId ?? null,
           amount: String(finalAmount),
-          dueDate: billingData.dueDate ?? new Date().toISOString().slice(0, 10),
+          dueDate: resolvedPeriod.dueDate,
           billPeriodMonths: String(billPeriodMonths),
+          billPeriodType: resolvedPeriod.billPeriodType,
+          billingEndDate: resolvedPeriod.billingEndDate,
           status: (billingData.status as 'pending' | 'paid' | 'overdue') ?? 'pending',
           totalDamages: String(totalDamages),
           depositUsed: String(depositUsed),
@@ -194,6 +317,8 @@ export const BillingService = {
 
     const { items: rawItems, damages, ...billingData } = payload;
 
+    const resolvedPeriod = resolveBillingPeriod(billingData, existing);
+
     const {
       processedItems,
       processedDamages,
@@ -210,7 +335,7 @@ export const BillingService = {
       transportCost: billingData.transportCost ?? existing.transportCost,
       // Falls back to the previously persisted Bill Period, never silently
       // resetting to the 1-month default when not explicitly changed.
-      billPeriodMonths: billingData.billPeriodMonths ?? existing.billPeriodMonths,
+      billPeriodMonths: resolvedPeriod.billPeriodMonths,
     });
 
     return db.transaction(async (tx) => {
@@ -220,8 +345,10 @@ export const BillingService = {
           rentalId: billingData.rentalId ?? existing.rentalId,
           customerId: billingData.customerId ?? existing.customerId,
           amount: String(finalAmount),
-          dueDate: billingData.dueDate ?? existing.dueDate,
+          dueDate: resolvedPeriod.dueDate,
           billPeriodMonths: String(billPeriodMonths),
+          billPeriodType: resolvedPeriod.billPeriodType,
+          billingEndDate: resolvedPeriod.billingEndDate,
           totalDamages: String(totalDamages),
           depositUsed: String(depositUsed),
           labourCost: billingData.labourCost != null ? String(billingData.labourCost) : existing.labourCost,

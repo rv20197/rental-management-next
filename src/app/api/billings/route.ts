@@ -19,6 +19,11 @@ const createBillingSchema = z.object({
   customerId: z.number().int().positive().optional(),
   amount: z.union([z.number(), z.string()]).optional(),
   dueDate: z.string().optional(),
+  /** Bill Period selector: '1' | '2' | '3' | '6' | '12' | 'custom'. Preferred over `billPeriodMonths`. */
+  billPeriodValue: z.string().optional(),
+  /** Billing End Date. Required for a Custom Dates Bill Period. */
+  billingEndDate: z.string().optional(),
+  /** @deprecated Legacy raw Bill Period length, in months. Prefer `billPeriodValue`. */
   billPeriodMonths: z
     .union([z.number(), z.string()])
     .refine((v) => {

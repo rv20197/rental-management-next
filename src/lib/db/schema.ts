@@ -26,6 +26,7 @@ export const rentalStatusEnum = pgEnum('rental_status', [
   'returned',
 ]);
 export const billingStatusEnum = pgEnum('billing_status', ['pending', 'paid', 'overdue']);
+export const billPeriodTypeEnum = pgEnum('bill_period_type', ['predefined', 'custom']);
 
 const timestamps = {
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
@@ -142,11 +143,27 @@ export const billings = pgTable(
     rentalId: integer('rentalId').references(() => rentals.id, { onDelete: 'cascade' }),
     customerId: integer('customerId').references(() => customers.id, { onDelete: 'cascade' }),
     amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+    // The Billing Start Date. Also historically doubled as the payment Due
+    // Date (see reminders/PDF), which is why the column is named `dueDate`.
     dueDate: date('dueDate', { mode: 'string' }).notNull(),
-    // Length of the Bill Period, in months, measured from `dueDate`. Defaults
-    // to 1 month but is user-selectable and persisted so edits/regeneration
-    // reuse the previously selected value instead of the default.
+    // Length of the Bill Period, in months, measured from `dueDate`. For a
+    // `predefined` billPeriodType this is one of the configurable whole-month
+    // options (see `lib/billing/period.ts`); for `custom` it is the
+    // calendar-prorated equivalent computed from the actual Start/End Date
+    // range. Defaults to 1 month but is user-selectable and persisted so
+    // edits/regeneration reuse the previously selected value instead of the
+    // default.
     billPeriodMonths: decimal('billPeriodMonths', { precision: 5, scale: 2 }).notNull().default('1'),
+    // Whether the Bill Period was chosen from the predefined list (1/2/3/6/12
+    // months) or as explicit Custom Dates.
+    billPeriodType: billPeriodTypeEnum('billPeriodType').notNull().default('predefined'),
+    // The Billing End Date (inclusive last billed day). Persisted explicitly
+    // (rather than only derived from dueDate + billPeriodMonths) so Custom
+    // Dates ranges — which aren't a whole number of calendar months from
+    // dueDate — are stored and reloaded exactly as selected. Nullable for
+    // bills created before this column existed; those fall back to a
+    // computed value at read time.
+    billingEndDate: date('billingEndDate', { mode: 'string' }),
     status: billingStatusEnum('status').notNull().default('pending'),
     paymentDate: date('paymentDate', { mode: 'string' }),
     returnedQuantity: integer('returnedQuantity'),

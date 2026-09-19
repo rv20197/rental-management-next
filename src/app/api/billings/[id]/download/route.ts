@@ -1,31 +1,13 @@
-import { eq } from 'drizzle-orm';
-import { db } from '@/lib/db';
-import { billings } from '@/lib/db/schema';
 import { generateRentalInvoicePdf } from '@/lib/pdf/rental-invoice-pdf';
 import { jsonError, requireAuth } from '@/lib/http';
+import { BillingService } from '@/lib/services/billingService';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth();
   if (auth instanceof Response) return auth;
   const { id } = await params;
-  const billingId = parseInt(id, 10);
-  if (!Number.isFinite(billingId)) return jsonError('Billing not found', 404);
 
-  const billing = await db.query.billings.findFirst({
-    where: eq(billings.id, billingId),
-    with: {
-      Rental: {
-        with: {
-          Customer: true,
-          Item: true,
-          RentalItems: { with: { Item: true } },
-        },
-      },
-      Customer: true,
-      BillingItems: { with: { Item: true } },
-      BillingDamages: true,
-    },
-  });
+  const billing = await BillingService.getBillingById(id);
   if (!billing) return jsonError('Billing not found', 404);
 
   const { buffer, filename } = await generateRentalInvoicePdf(billing);

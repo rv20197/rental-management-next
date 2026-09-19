@@ -25,12 +25,20 @@ export interface Billing {
   rentalId?: number;
   customerId?: number;
   amount: number;
+  /** Billing Start Date (historically also the payment Due Date). */
   dueDate: string;
   /** Bill Period length, in months, from dueDate. Defaults to 1. */
   billPeriodMonths?: number;
-  /** Server-computed: dueDate (billingStartDate) + billPeriodMonths. */
+  /** Whether the Bill Period is a predefined duration or explicit Custom Dates. */
+  billPeriodType?: 'predefined' | 'custom';
+  /** Bill Period selector value: '1' | '2' | '3' | '6' | '12' | 'custom'. */
+  billPeriodValue?: string;
+  /** Same as `dueDate` — the Billing Start Date. */
   billingStartDate?: string;
+  /** Billing End Date (inclusive last billed day). */
   billingEndDate?: string | null;
+  /** Number of calendar days spanned by the billing period, inclusive of both ends. */
+  billingDurationDays?: number | null;
   status: 'pending' | 'paid' | 'overdue';
   createdAt?: string;
   totalDamages?: number;
@@ -48,8 +56,13 @@ export interface CreateBillingPayload {
   rentalId?: number;
   customerId?: number;
   amount: number;
+  /** Billing Start Date (historically also the payment Due Date). */
   dueDate: string;
-  /** Bill Period length, in months, from dueDate. Defaults to 1. */
+  /** Bill Period selector: '1' | '2' | '3' | '6' | '12' | 'custom'. Preferred over `billPeriodMonths`. */
+  billPeriodValue?: string;
+  /** Billing End Date. Required when `billPeriodValue` is 'custom'. */
+  billingEndDate?: string;
+  /** @deprecated Legacy raw Bill Period length, in months, from dueDate. Prefer `billPeriodValue`. */
   billPeriodMonths?: number;
   status?: 'pending' | 'paid' | 'overdue';
   items?: Partial<BillingItem>[];

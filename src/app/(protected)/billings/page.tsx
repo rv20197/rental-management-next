@@ -42,9 +42,16 @@ import CostBreakdown from '@/components/CostBreakdown';
 import { compareValues, getNextSortDirection, type SortDirection } from '@/lib/tableUtils';
 import { downloadAttachment } from '@/lib/blobDownload';
 import {
-  BILL_PERIOD_OPTIONS_MONTHS,
-  DEFAULT_BILL_PERIOD_MONTHS,
+  BILL_PERIOD_OPTIONS,
+  DEFAULT_BILL_PERIOD_VALUE,
+  applyBillPeriodOptionChange,
+  applyBillingEndDateChange,
+  applyBillingStartDateChange,
+  calculateBillPeriodDays,
   calculateBillPeriodEndDate,
+  isCustomBillPeriodValue,
+  resolveBillPeriodMonths,
+  validateBillingDateRange,
 } from '@/lib/billing/period';
 
 const BillingRow = React.memo(function BillingRow({
@@ -226,7 +233,11 @@ export default function BillingsPage() {
   const [newCustomerId, setNewCustomerId] = useState<number | ''>('');
   const [newRentalId, setNewRentalId] = useState<number | ''>('');
   const [newDueDate, setNewDueDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [newBillPeriodMonths, setNewBillPeriodMonths] = useState<number>(DEFAULT_BILL_PERIOD_MONTHS);
+  const [newBillPeriodValue, setNewBillPeriodValue] = useState<string>(DEFAULT_BILL_PERIOD_VALUE);
+  const [newBillingEndDate, setNewBillingEndDate] = useState<string>(() =>
+    calculateBillPeriodEndDate(new Date().toISOString().slice(0, 10), 1),
+  );
+  const [dateRangeError, setDateRangeError] = useState<string | null>(null);
   const [editingBillingId, setEditingBillingId] = useState<number | null>(null);
   const [newItems, setNewItems] = useState<
     { itemId: number | ''; quantity: number; rate: number; total: number }[]
@@ -278,15 +289,54 @@ export default function BillingsPage() {
   };
 
   const monthlyRentTotal = useMemo(() => newItems.reduce((sum, item) => sum + item.total, 0), [newItems]);
-  const grandTotal = useMemo(
-    () => monthlyRentTotal * newBillPeriodMonths,
-    [monthlyRentTotal, newBillPeriodMonths],
+
+  const isCustomPeriod = isCustomBillPeriodValue(newBillPeriodValue);
+
+  // The final Billing Start/End Date are the single source of truth for all
+  // billing calculations: predefined periods use their fixed month count,
+  // Custom Dates use the calendar-prorated equivalent of the actual range.
+  const effectiveBillPeriodMonths = useMemo(
+    () =>
+      newDueDate && newBillingEndDate ? resolveBillPeriodMonths(newBillPeriodValue, newDueDate, newBillingEndDate) : 0,
+    [newBillPeriodValue, newDueDate, newBillingEndDate],
   );
 
-  const billingEndDate = useMemo(
-    () => (newDueDate ? calculateBillPeriodEndDate(newDueDate, newBillPeriodMonths) : ''),
-    [newDueDate, newBillPeriodMonths],
+  const billingDurationDays = useMemo(
+    () => (newDueDate && newBillingEndDate ? calculateBillPeriodDays(newDueDate, newBillingEndDate) : 0),
+    [newDueDate, newBillingEndDate],
   );
+
+  const grandTotal = useMemo(
+    () => monthlyRentTotal * effectiveBillPeriodMonths,
+    [monthlyRentTotal, effectiveBillPeriodMonths],
+  );
+
+  const billingEndDate = newBillingEndDate;
+
+  const handleBillPeriodValueChange = (value: string) => {
+    const { billPeriodValue, billingEndDate: nextEnd } = applyBillPeriodOptionChange(
+      value,
+      newDueDate,
+      newBillingEndDate,
+    );
+    setNewBillPeriodValue(billPeriodValue);
+    setNewBillingEndDate(nextEnd);
+    setDateRangeError(validateBillingDateRange(newDueDate, nextEnd));
+  };
+
+  const handleBillingStartDateChange = (value: string) => {
+    const { billingEndDate: nextEnd } = applyBillingStartDateChange(value, newBillPeriodValue, newBillingEndDate);
+    setNewDueDate(value);
+    setNewBillingEndDate(nextEnd);
+    setDateRangeError(validateBillingDateRange(value, nextEnd));
+  };
+
+  const handleBillingEndDateChange = (value: string) => {
+    const { billPeriodValue } = applyBillingEndDateChange(value, newDueDate);
+    setNewBillingEndDate(value);
+    setNewBillPeriodValue(billPeriodValue);
+    setDateRangeError(validateBillingDateRange(newDueDate, value));
+  };
 
   const totalDamages = useMemo(
     () => newDamages.reduce((sum, d) => sum + d.amount, 0),
@@ -345,8 +395,11 @@ export default function BillingsPage() {
   const resetBillingForm = () => {
     setNewCustomerId('');
     setNewRentalId('');
-    setNewDueDate(new Date().toISOString().slice(0, 10));
-    setNewBillPeriodMonths(DEFAULT_BILL_PERIOD_MONTHS);
+    const today = new Date().toISOString().slice(0, 10);
+    setNewDueDate(today);
+    setNewBillPeriodValue(DEFAULT_BILL_PERIOD_VALUE);
+    setNewBillingEndDate(calculateBillPeriodEndDate(today, 1));
+    setDateRangeError(null);
     setEditingBillingId(null);
     setNewItems([{ itemId: '', quantity: 1, rate: 0, total: 0 }]);
     setNewDamages([]);
@@ -359,9 +412,22 @@ export default function BillingsPage() {
     setEditingBillingId(billing.id);
     setNewCustomerId(billing.customerId ?? billing.Customer?.id ?? '');
     setNewRentalId(billing.rentalId ?? '');
-    setNewDueDate(billing.dueDate ? new Date(billing.dueDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
-    // Load the previously persisted Bill Period rather than resetting to the default.
-    setNewBillPeriodMonths(Number(billing.billPeriodMonths) || DEFAULT_BILL_PERIOD_MONTHS);
+    const startDate = billing.dueDate
+      ? new Date(billing.dueDate).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    setNewDueDate(startDate);
+    // Load the previously persisted Bill Period and dates rather than
+    // resetting to the default or recalculating.
+    const persistedValue =
+      billing.billPeriodValue ??
+      (billing.billPeriodType === 'custom' ? 'custom' : String(Number(billing.billPeriodMonths) || 1));
+    setNewBillPeriodValue(persistedValue);
+    setNewBillingEndDate(
+      billing.billingEndDate
+        ? new Date(billing.billingEndDate).toISOString().slice(0, 10)
+        : calculateBillPeriodEndDate(startDate, Number(billing.billPeriodMonths) || 1),
+    );
+    setDateRangeError(null);
     setAvailableDeposit(Number(billing.availableDeposit) || 0);
     setNewLabourCost(billing.labourCost ? String(billing.labourCost) : '');
     setNewTransportCost(billing.transportCost ? String(billing.transportCost) : '');
@@ -386,13 +452,19 @@ export default function BillingsPage() {
     const validItems = newItems.filter((it) => it.itemId !== '' && it.quantity > 0 && it.rate >= 0);
     if (validItems.length === 0) return toast.warning('Please add at least one valid item');
     if (!newCustomerId) return toast.warning('Please select a customer');
+    const rangeError = validateBillingDateRange(newDueDate, newBillingEndDate);
+    if (rangeError) {
+      setDateRangeError(rangeError);
+      return toast.warning(rangeError);
+    }
 
     const payload = {
       customerId: typeof newCustomerId === 'string' ? undefined : newCustomerId,
       rentalId: newRentalId === '' ? undefined : Number(newRentalId),
       amount: finalPayable,
       dueDate: newDueDate,
-      billPeriodMonths: newBillPeriodMonths,
+      billPeriodValue: newBillPeriodValue,
+      billingEndDate: newBillingEndDate,
       status: 'pending' as const,
       items: validItems as any,
       damages: newDamages.filter((d) => d.description !== '' && d.amount > 0),
@@ -643,42 +715,62 @@ export default function BillingsPage() {
                 </select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="due">Due Date</Label>
-                <Input
-                  id="due"
-                  type="date"
-                  value={newDueDate}
-                  onChange={(e) => setNewDueDate(e.target.value)}
-                  required
-                />
-              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="billPeriod">Bill Period</Label>
                 <select
                   id="billPeriod"
                   className="w-full p-2 border rounded-md bg-background text-sm"
-                  value={newBillPeriodMonths}
-                  onChange={(e) => setNewBillPeriodMonths(Number(e.target.value))}
+                  value={newBillPeriodValue}
+                  onChange={(e) => handleBillPeriodValueChange(e.target.value)}
                   required
                 >
-                  {BILL_PERIOD_OPTIONS_MONTHS.map((m) => (
-                    <option key={m} value={m}>
-                      {m} {m === 1 ? 'Month' : 'Months'}
+                  {BILL_PERIOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>Billing Period Range</Label>
-                <div className="h-9 flex items-center px-3 border rounded-md bg-muted/50 text-sm">
-                  {newDueDate ? `${new Date(newDueDate).toLocaleDateString('en-IN')} to ${billingEndDate ? new Date(billingEndDate).toLocaleDateString('en-IN') : '—'}` : '—'}
-                </div>
+                <Label htmlFor="billingStart">Billing Start Date</Label>
+                <Input
+                  id="billingStart"
+                  type="date"
+                  value={newDueDate}
+                  onChange={(e) => handleBillingStartDateChange(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="billingEnd">Billing End Date</Label>
+                <Input
+                  id="billingEnd"
+                  type="date"
+                  value={newBillingEndDate}
+                  onChange={(e) => handleBillingEndDateChange(e.target.value)}
+                  min={newDueDate || undefined}
+                  required
+                />
               </div>
             </div>
+
+            <div className="space-y-1">
+              <div className="h-9 flex items-center justify-between px-3 border rounded-md bg-muted/50 text-sm">
+                <span>
+                  {newDueDate
+                    ? `${new Date(newDueDate).toLocaleDateString('en-IN')} to ${billingEndDate ? new Date(billingEndDate).toLocaleDateString('en-IN') : '—'}`
+                    : '—'}
+                </span>
+                {billingDurationDays > 0 && (
+                  <span className="text-muted-foreground text-xs">Billing Duration: {billingDurationDays} days</span>
+                )}
+              </div>
+              {dateRangeError && <p className="text-xs text-destructive">{dateRangeError}</p>}
+            </div>
+
 
             {newCustomerId !== '' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -763,9 +855,9 @@ export default function BillingsPage() {
                       />
                     </div>
                     <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Total ({newBillPeriodMonths}mo)</Label>
+                      <Label className="text-[10px]">Total ({effectiveBillPeriodMonths.toFixed(2)}mo)</Label>
                       <div className="h-8 flex items-center text-xs font-semibold px-2 bg-muted rounded-md">
-                        ₹{(item.total * newBillPeriodMonths).toFixed(2)}
+                        ₹{(item.total * effectiveBillPeriodMonths).toFixed(2)}
                       </div>
                     </div>
                     <div className="col-span-1">
@@ -878,7 +970,10 @@ export default function BillingsPage() {
               <h4 className="text-sm font-semibold">Bill Summary</h4>
               <div className="space-y-1 text-sm bg-muted/30 p-3 rounded-md border">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Rent Amount ({newBillPeriodMonths} {newBillPeriodMonths === 1 ? 'month' : 'months'}):</span>
+                  <span className="text-muted-foreground">
+                    Rent Amount ({effectiveBillPeriodMonths.toFixed(2)} {effectiveBillPeriodMonths === 1 ? 'month' : 'months'}
+                    {isCustomPeriod ? `, ${billingDurationDays} days` : ''}):
+                  </span>
                   <span>₹{grandTotal.toFixed(2)}</span>
                 </div>
                 {totalDamages > 0 && (
@@ -978,13 +1073,21 @@ export default function BillingsPage() {
                   <p className="font-semibold">{selectedBilling.rentalId || 'Standalone'}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Due Date</p>
+                  <p className="text-muted-foreground">Billing Start Date</p>
                   <p className="font-semibold">{new Date(selectedBilling.dueDate).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Billing End Date</p>
+                  <p className="font-semibold">
+                    {selectedBilling.billingEndDate ? new Date(selectedBilling.billingEndDate).toLocaleDateString() : '—'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Bill Period</p>
                   <p className="font-semibold">
-                    {selectedBilling.billPeriodMonths ?? 1} {(selectedBilling.billPeriodMonths ?? 1) === 1 ? 'Month' : 'Months'}
+                    {selectedBilling.billPeriodType === 'custom'
+                      ? 'Custom Dates'
+                      : `${selectedBilling.billPeriodMonths ?? 1} ${(selectedBilling.billPeriodMonths ?? 1) === 1 ? 'Month' : 'Months'}`}
                     {' '}
                     ({new Date(selectedBilling.dueDate).toLocaleDateString('en-IN')} to{' '}
                     {selectedBilling.billingEndDate
@@ -993,6 +1096,12 @@ export default function BillingsPage() {
                     )
                   </p>
                 </div>
+                {selectedBilling.billingDurationDays != null && (
+                  <div>
+                    <p className="text-muted-foreground">Billing Duration</p>
+                    <p className="font-semibold">{selectedBilling.billingDurationDays} days</p>
+                  </div>
+                )}
                 {selectedBilling.Rental?.startDate && selectedBilling.Rental?.endDate && (
                   <div>
                     <p className="text-muted-foreground">Rental Duration</p>
