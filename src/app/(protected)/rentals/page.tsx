@@ -1,7 +1,14 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { useGetRentalsQuery, useCreateRentalMutation, useUpdateRentalMutation } from '@/api/rentalApi';
+import React, { useState, useMemo } from 'react';
+import {
+  useGetRentalsQuery,
+  useCreateRentalMutation,
+  useUpdateRentalMutation,
+  type CreateRentalPayload,
+  type Rental,
+  type RentalItem,
+} from '@/api/rentalApi';
 import { useReturnAndBillMutation } from '@/api/billingApi';
 import { useGetItemsQuery } from '@/api/itemApi';
 import { toast } from 'sonner';
@@ -47,6 +54,8 @@ const downloadFile = async (endpoint: string, fallbackFilename: string) => {
   }
 };
 
+type RentalFormItem = { itemId: number | ''; quantity: number; unitPrice: number | '' };
+
 const RentalRow = React.memo(function RentalRow({
   rental,
   onReturn,
@@ -54,11 +63,11 @@ const RentalRow = React.memo(function RentalRow({
   onView,
   onEdit,
 }: {
-  rental: any;
+  rental: Rental;
   onReturn: (id: number) => void;
   onExtend: (id: number, currentEndDate: string) => void;
-  onView: (rental: any) => void;
-  onEdit: (rental: any) => void;
+  onView: (rental: Rental) => void;
+  onEdit: (rental: Rental) => void;
 }) {
   const handleDownloadEstimation = () => {
     downloadFile(`/rentals/${rental.id}/estimation`, `estimation-${rental.id}.pdf`);
@@ -66,12 +75,12 @@ const RentalRow = React.memo(function RentalRow({
 
   const totalQty =
     rental.RentalItems && rental.RentalItems.length > 0
-      ? rental.RentalItems.reduce((acc: number, ri: any) => acc + ri.quantity, 0)
+      ? rental.RentalItems.reduce((acc, ri) => acc + ri.quantity, 0)
       : rental.quantity;
   const outstandingQty = rental.outstandingQty ?? Math.max((totalQty ?? 0) - (rental.returnedQuantity ?? 0), 0);
   const itemNames =
     rental.RentalItems && rental.RentalItems.length > 0
-      ? rental.RentalItems.map((ri: any) => ri.Item?.name).filter(Boolean).join(', ')
+      ? rental.RentalItems.map((ri) => ri.Item?.name).filter(Boolean).join(', ')
       : rental.Item?.name ?? '-';
 
   return (
@@ -288,14 +297,12 @@ export default function RentalsPage() {
     const trimmed = manualValue.trim();
     if (trimmed === '') return fallbackValue;
     const parsed = Number(trimmed);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallbackValue;
   };
 
   const [newOpen, setNewOpen] = useState(false);
   const [newCustomerId, setNewCustomerId] = useState<number | ''>('');
-  const [newItems, setNewItems] = useState<
-    { itemId: number | ''; quantity: number; unitPrice: number | '' }[]
-  >([{ itemId: '', quantity: 1, unitPrice: '' }]);
+  const [newItems, setNewItems] = useState<RentalFormItem[]>([{ itemId: '', quantity: 1, unitPrice: '' }]);
   const [newStartDate, setNewStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [newEndDate, setNewEndDate] = useState<string>(
     (() => {
@@ -312,9 +319,7 @@ export default function RentalsPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editRentalId, setEditRentalId] = useState<number | null>(null);
-  const [editItems, setEditItems] = useState<
-    { itemId: number | ''; quantity: number; unitPrice: number | '' }[]
-  >([]);
+  const [editItems, setEditItems] = useState<RentalFormItem[]>([]);
   const [editEndDate, setEditEndDate] = useState<string>('');
   const [editDepositAmount, setEditDepositAmount] = useState<string>('');
   const [isEditDepositOverridden, setIsEditDepositOverridden] = useState(false);
@@ -322,49 +327,11 @@ export default function RentalsPage() {
   const [editTransportCost, setEditTransportCost] = useState<string>('');
   const [editAddress, setEditAddress] = useState<string>('');
 
-  useEffect(() => {
-    if (newOpen && !isNewDepositOverridden) {
-      let total = 0;
-      newItems.forEach((item) => {
-        if (item.itemId !== '') {
-          const product = allItems.find((it) => it.id === Number(item.itemId));
-          const rate =
-            item.unitPrice !== '' && item.unitPrice != null
-              ? Number(item.unitPrice)
-              : product
-                ? Number(product.monthlyRate)
-                : 0;
-          total += calculateDefaultDeposit(rate, item.quantity);
-        }
-      });
-      setNewDepositAmount(total > 0 ? total.toString() : '');
-    }
-  }, [newItems, allItems, isNewDepositOverridden, newOpen]);
-
-  useEffect(() => {
-    if (editOpen && !isEditDepositOverridden) {
-      let total = 0;
-      editItems.forEach((item) => {
-        if (item.itemId !== '') {
-          const product = allItems.find((it) => it.id === Number(item.itemId));
-          const rate =
-            item.unitPrice !== '' && item.unitPrice != null
-              ? Number(item.unitPrice)
-              : product
-                ? Number(product.monthlyRate)
-                : 0;
-          total += calculateDefaultDeposit(rate, item.quantity);
-        }
-      });
-      setEditDepositAmount(total > 0 ? total.toString() : '');
-    }
-  }, [editItems, allItems, isEditDepositOverridden, editOpen]);
-
-  const [selectedRental, setSelectedRental] = useState<any>(null);
+  const [selectedRental, setSelectedRental] = useState<Rental | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [isNewlyCreated, setIsNewlyCreated] = useState(false);
 
-  const handleView = (rental: any) => {
+  const handleView = (rental: Rental) => {
     setSelectedRental(rental);
     setViewOpen(true);
   };
@@ -390,10 +357,10 @@ export default function RentalsPage() {
     [allRentals, extendOpenRentalId],
   );
 
-  const handleOpenReturn = (rental: any) => {
+  const handleOpenReturn = (rental: Rental) => {
     setSelectedReturnRentalId(rental.id);
     const firstAvailableItem = rental.RentalItems?.find(
-      (ri: any) => ri.quantity - (ri.returnedQuantity || 0) > 0,
+      (ri) => ri.quantity - (ri.returnedQuantity || 0) > 0,
     );
     if (firstAvailableItem) {
       setReturnItems([
@@ -427,8 +394,8 @@ export default function RentalsPage() {
       setReturnReturnTransportCost('');
       setReturnDamagesCost('');
       toast.success('Return processed successfully!');
-      const billing = (result as any)?.billing;
-      if (billing?.id) {
+      const billing = result.billing;
+      if (billing.id) {
         downloadFile(`/billings/${billing.id}/download`, `bill-${billing.id}.pdf`);
       }
     } catch {
@@ -448,7 +415,11 @@ export default function RentalsPage() {
     }
   };
 
-  const handleItemChange = (index: number, field: string, value: any) => {
+  const handleItemChange = (
+    index: number,
+    field: keyof RentalFormItem,
+    value: RentalFormItem[typeof field],
+  ) => {
     const updated = [...newItems];
     const row = { ...updated[index], [field]: value };
     if (field === 'itemId' && value !== '') {
@@ -483,10 +454,10 @@ export default function RentalsPage() {
     }
   };
 
-  const handleEdit = (rental: any) => {
+  const handleEdit = (rental: Rental) => {
     setEditRentalId(rental.id);
     setEditItems(
-      rental.RentalItems.map((ri: any) => ({
+      rental.RentalItems?.map((ri) => ({
         itemId: ri.itemId,
         quantity: ri.quantity,
         unitPrice:
@@ -495,10 +466,10 @@ export default function RentalsPage() {
             : ri.Item?.monthlyRate != null
               ? Number(ri.Item.monthlyRate)
               : '',
-      })),
+      })) ?? [],
     );
-    setEditEndDate(new Date(rental.endDate).toISOString().slice(0, 10));
-    setEditDepositAmount(rental.depositAmount.toString());
+    setEditEndDate(rental.endDate ? new Date(rental.endDate).toISOString().slice(0, 10) : '');
+    setEditDepositAmount(rental.depositAmount?.toString() ?? '');
     setEditLabourCost(rental.labourCost?.toString() || '');
     setEditTransportCost(rental.transportCost?.toString() || '');
     setEditAddress(rental.address ?? '');
@@ -540,7 +511,7 @@ export default function RentalsPage() {
     return map;
   }, [allItems]);
 
-  const calculateTotals = (items: any[], startDate: string, endDate: string) => {
+  const calculateTotals = (items: RentalFormItem[], startDate: string, endDate: string) => {
     if (!startDate || !endDate) return { rent: 0, deposit: 0, total: 0 };
     const months = calculateMonthsRented(new Date(startDate), new Date(endDate));
     let rent = 0;
@@ -617,7 +588,7 @@ export default function RentalsPage() {
     }
 
     try {
-      const payload: any = {
+      const payload: CreateRentalPayload = {
         customerId: Number(newCustomerId),
         items: validItems.map((item) => ({
           itemId: Number(item.itemId),
@@ -897,7 +868,7 @@ export default function RentalsPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const firstAvailableItem = selectedReturnRental?.RentalItems?.find((ri: any) => {
+                    const firstAvailableItem = selectedReturnRental?.RentalItems?.find((ri) => {
                       const alreadyInList = returnItems.some((it) => it.rentalItemId === ri.id);
                       return !alreadyInList && ri.quantity - (ri.returnedQuantity || 0) > 0;
                     });
@@ -921,7 +892,7 @@ export default function RentalsPage() {
               <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                 {returnItems.map((item, index) => {
                   const rentalItem = selectedReturnRental?.RentalItems?.find(
-                    (ri: any) => ri.id === item.rentalItemId,
+                    (ri) => ri.id === item.rentalItemId,
                   );
                   const available = rentalItem ? rentalItem.quantity - (rentalItem.returnedQuantity || 0) : 0;
 
@@ -935,7 +906,7 @@ export default function RentalsPage() {
                           onChange={(e) => {
                             const newId = Number(e.target.value);
                             const ri = selectedReturnRental?.RentalItems?.find(
-                              (x: any) => x.id === newId,
+                              (x) => x.id === newId,
                             );
                             const updated = [...returnItems];
                             updated[index] = {
@@ -945,7 +916,7 @@ export default function RentalsPage() {
                             setReturnItems(updated);
                           }}
                         >
-                          {selectedReturnRental?.RentalItems?.filter((ri: any) => {
+                          {selectedReturnRental?.RentalItems?.filter((ri) => {
                             const isCurrentInList = ri.id === item.rentalItemId;
                             const alreadyInList = returnItems.some(
                               (it, i) => it.rentalItemId === ri.id && i !== index,
@@ -953,8 +924,8 @@ export default function RentalsPage() {
                             const hasRemaining = ri.quantity - (ri.returnedQuantity || 0) > 0;
                             return (isCurrentInList || !alreadyInList) && hasRemaining;
                           })
-                            .sort((a: any, b: any) => a.id - b.id)
-                            .map((ri: any) => (
+                            .sort((a, b) => a.id - b.id)
+                            .map((ri) => (
                               <option key={ri.id} value={ri.id}>
                                 {ri.Item?.name} (Rented: {ri.quantity}, Returned: {ri.returnedQuantity || 0})
                               </option>
@@ -1236,22 +1207,32 @@ export default function RentalsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="deposit">Deposit (₹)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="deposit">Deposit (₹)</Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => setIsNewDepositOverridden(false)}
+                >
+                  Reset to Auto-Calculate
+                </Button>
+              </div>
               <Input
                 id="deposit"
                 type="number"
                 min={0}
                 step="0.01"
                 placeholder={newTotals.deposit.toFixed(2)}
-                value={newDepositAmount}
+                value={isNewDepositOverridden ? newDepositAmount : ''}
                 onChange={(e) => {
                   const v = e.target.value;
                   setNewDepositAmount(v);
-                  setIsNewDepositOverridden(v.trim() !== '' && Number(v) > 0);
+                  setIsNewDepositOverridden(true);
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Leave blank or set to 0 to use auto-calculated deposit of ₹{newTotals.deposit.toFixed(2)}.
+                Leave blank to use auto-calculated deposit of ₹{newTotals.deposit.toFixed(2)}, or enter 0 for no deposit.
               </p>
             </div>
 
@@ -1471,22 +1452,32 @@ export default function RentalsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="deposit-edit">Deposit (₹)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="deposit-edit">Deposit (₹)</Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => setIsEditDepositOverridden(false)}
+                >
+                  Reset to Auto-Calculate
+                </Button>
+              </div>
               <Input
                 id="deposit-edit"
                 type="number"
                 min={0}
                 step="0.01"
                 placeholder={editTotals.deposit.toFixed(2)}
-                value={editDepositAmount}
+                value={isEditDepositOverridden ? editDepositAmount : ''}
                 onChange={(e) => {
                   const v = e.target.value;
                   setEditDepositAmount(v);
-                  setIsEditDepositOverridden(v.trim() !== '' && Number(v) > 0);
+                  setIsEditDepositOverridden(true);
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                Leave blank or set to 0 to use auto-calculated deposit of ₹{editTotals.deposit.toFixed(2)}.
+                Leave blank to use auto-calculated deposit of ₹{editTotals.deposit.toFixed(2)}, or enter 0 for no deposit.
               </p>
             </div>
 
@@ -1607,7 +1598,9 @@ export default function RentalsPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">End Date</p>
-                  <p className="font-semibold">{new Date(selectedRental.endDate).toLocaleDateString()}</p>
+                  <p className="font-semibold">
+                    {selectedRental.endDate ? new Date(selectedRental.endDate).toLocaleDateString() : 'N/A'}
+                  </p>
                 </div>
                 {(selectedRental.address || selectedRental.Customer?.address) ? (
                   <div className="col-span-2">
@@ -1650,7 +1643,7 @@ export default function RentalsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {selectedRental.RentalItems?.map((ri: any) => (
+                      {selectedRental.RentalItems?.map((ri: RentalItem) => (
                         <TableRow key={ri.id}>
                           <TableCell>{ri.Item?.name || `Item ${ri.itemId}`}</TableCell>
                           <TableCell>{ri.quantity}</TableCell>
@@ -1676,11 +1669,11 @@ export default function RentalsPage() {
                     baseAmount={(() => {
                       const months = calculateMonthsRented(
                         new Date(selectedRental.startDate),
-                        new Date(selectedRental.endDate),
+                        new Date(selectedRental.endDate ?? selectedRental.startDate),
                       );
                       let total = 0;
                       if (selectedRental.RentalItems && selectedRental.RentalItems.length > 0) {
-                        selectedRental.RentalItems.forEach((ri: any) => {
+                        selectedRental.RentalItems.forEach((ri: RentalItem) => {
                           const rate = ri.Item?.monthlyRate ? Number(ri.Item.monthlyRate) : 0;
                           total += ri.quantity * rate * months;
                         });
@@ -1723,7 +1716,7 @@ export default function RentalsPage() {
               disabled={selectedRental?.status === 'returned' || selectedRental?.status === 'completed'}
               onClick={() => {
                 setViewOpen(false);
-                handleEdit(selectedRental);
+                if (selectedRental) handleEdit(selectedRental);
               }}
             >
               <Pencil className="size-4" /> Edit Rental

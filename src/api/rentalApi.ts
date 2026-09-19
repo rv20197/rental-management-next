@@ -29,6 +29,9 @@ export interface Rental {
   depositAmount?: number;
   labourCost?: number;
   transportCost?: number;
+  returnLabourCost?: number;
+  returnTransportCost?: number;
+  damagesCost?: number;
   address?: string | null;
   status: 'active' | 'completed' | 'cancelled' | 'pending' | 'created' | 'returned';
   createdAt?: string;
