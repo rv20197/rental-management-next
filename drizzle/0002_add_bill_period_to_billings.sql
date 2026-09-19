@@ -1,0 +1,1 @@
+ALTER TABLE "Billings" ADD COLUMN "billPeriodMonths" numeric(5, 2) DEFAULT '1' NOT NULL;

@@ -10,6 +10,8 @@ import {
   rentals,
 } from '@/lib/db/schema';
 import { calculateMonthsRented } from '@/lib/billing/months';
+import { calculateBillingTotals } from '@/lib/billing/calculations';
+import { calculateBillPeriodEndDate, normalizeBillPeriodMonths } from '@/lib/billing/period';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -24,6 +26,8 @@ interface CreateBillingPayload {
   customerId?: number;
   amount?: number | string;
   dueDate?: string;
+  /** Bill Period length, in months, from `dueDate`. Defaults to 1. */
+  billPeriodMonths?: number | string;
   status?: string;
   paymentDate?: string;
   labourCost?: number | string | null;
@@ -32,6 +36,8 @@ interface CreateBillingPayload {
   items?: { itemId?: number | null; description?: string; quantity: number | string; rate: number | string }[];
   damages?: { description: string; amount: number | string }[];
 }
+
+type UpdateBillingPayload = CreateBillingPayload;
 
 interface ReturnAndBillPayload {
   rentalId: number;
@@ -66,6 +72,8 @@ function enrichBilling(b: any) {
   const transportCost = num(b.transportCost);
   const totalAmount = num(b.amount);
   const baseAmount = totalAmount - labourCost - transportCost;
+  const billPeriodMonths = normalizeBillPeriodMonths(b.billPeriodMonths);
+  const billingEndDate = b.dueDate ? calculateBillPeriodEndDate(b.dueDate, billPeriodMonths) : null;
   return {
     ...b,
     baseAmount,
@@ -73,6 +81,9 @@ function enrichBilling(b: any) {
     labourCost,
     depositAmount: num(b.Rental?.depositAmount),
     totalAmount,
+    billPeriodMonths,
+    billingStartDate: b.dueDate ?? null,
+    billingEndDate,
   };
 }
 
@@ -106,40 +117,22 @@ export const BillingService = {
   async createBilling(payload: CreateBillingPayload) {
     const { items: rawItems, damages, ...billingData } = payload;
 
-    let itemsTotal = 0;
-    const processedItems: { itemId: number | null; description?: string; quantity: number; rate: number; total: number }[] = [];
-    if (rawItems && rawItems.length > 0) {
-      for (const it of rawItems) {
-        const quantity = num(it.quantity);
-        const rate = num(it.rate);
-        const total = quantity * rate;
-        itemsTotal += total;
-        processedItems.push({
-          itemId: it.itemId ?? null,
-          description: it.description,
-          quantity,
-          rate,
-          total,
-        });
-      }
-    } else {
-      itemsTotal = num(billingData.amount);
-    }
-
-    let totalDamages = 0;
-    const processedDamages: { description: string; amount: number }[] = [];
-    if (damages && damages.length > 0) {
-      for (const d of damages) {
-        const amount = num(d.amount);
-        totalDamages += amount;
-        processedDamages.push({ description: d.description, amount });
-      }
-    }
-
-    const availableDeposit = num(billingData.availableDeposit);
-    const depositUsed = Math.min(availableDeposit, totalDamages);
-    const excessDamages = Math.max(0, totalDamages - availableDeposit);
-    const finalAmount = itemsTotal + excessDamages;
+    const {
+      processedItems,
+      processedDamages,
+      totalDamages,
+      depositUsed,
+      finalAmount,
+      billPeriodMonths,
+    } = calculateBillingTotals({
+      items: rawItems,
+      damages,
+      amount: billingData.amount,
+      availableDeposit: billingData.availableDeposit,
+      labourCost: billingData.labourCost,
+      transportCost: billingData.transportCost,
+      billPeriodMonths: billingData.billPeriodMonths,
+    });
 
     return db.transaction(async (tx) => {
       const [created] = await tx
@@ -149,6 +142,7 @@ export const BillingService = {
           customerId: billingData.customerId ?? null,
           amount: String(finalAmount),
           dueDate: billingData.dueDate ?? new Date().toISOString().slice(0, 10),
+          billPeriodMonths: String(billPeriodMonths),
           status: (billingData.status as 'pending' | 'paid' | 'overdue') ?? 'pending',
           totalDamages: String(totalDamages),
           depositUsed: String(depositUsed),
@@ -181,6 +175,88 @@ export const BillingService = {
       }
 
       return loadBillingAggregate(created.id);
+    });
+  },
+
+  /**
+   * Recalculates and updates an existing billing using a (possibly changed)
+   * Bill Period, due date, items, damages, or costs. Line items and damages
+   * are replaced with freshly recalculated rows so the stored totals always
+   * reflect the currently selected Bill Period.
+   */
+  async updateBilling(id: string, payload: UpdateBillingPayload) {
+    const billingId = parseInt(id, 10);
+    if (!Number.isFinite(billingId)) throw new Error('Billing not found');
+
+    const existing = await db.query.billings.findFirst({ where: eq(billings.id, billingId) });
+    if (!existing) throw new Error('Billing not found');
+    if (existing.status === 'paid') throw new Error('Cannot edit a billing that has already been paid');
+
+    const { items: rawItems, damages, ...billingData } = payload;
+
+    const {
+      processedItems,
+      processedDamages,
+      totalDamages,
+      depositUsed,
+      finalAmount,
+      billPeriodMonths,
+    } = calculateBillingTotals({
+      items: rawItems,
+      damages,
+      amount: billingData.amount ?? existing.amount,
+      availableDeposit: billingData.availableDeposit,
+      labourCost: billingData.labourCost ?? existing.labourCost,
+      transportCost: billingData.transportCost ?? existing.transportCost,
+      // Falls back to the previously persisted Bill Period, never silently
+      // resetting to the 1-month default when not explicitly changed.
+      billPeriodMonths: billingData.billPeriodMonths ?? existing.billPeriodMonths,
+    });
+
+    return db.transaction(async (tx) => {
+      await tx
+        .update(billings)
+        .set({
+          rentalId: billingData.rentalId ?? existing.rentalId,
+          customerId: billingData.customerId ?? existing.customerId,
+          amount: String(finalAmount),
+          dueDate: billingData.dueDate ?? existing.dueDate,
+          billPeriodMonths: String(billPeriodMonths),
+          totalDamages: String(totalDamages),
+          depositUsed: String(depositUsed),
+          labourCost: billingData.labourCost != null ? String(billingData.labourCost) : existing.labourCost,
+          transportCost:
+            billingData.transportCost != null ? String(billingData.transportCost) : existing.transportCost,
+        })
+        .where(eq(billings.id, billingId));
+
+      await tx.delete(billingItems).where(eq(billingItems.billingId, billingId));
+      await tx.delete(billingDamages).where(eq(billingDamages.billingId, billingId));
+
+      if (processedItems.length > 0) {
+        await tx.insert(billingItems).values(
+          processedItems.map((p) => ({
+            billingId,
+            itemId: p.itemId,
+            description: p.description,
+            quantity: p.quantity,
+            rate: String(p.rate),
+            total: String(p.total),
+          })),
+        );
+      }
+
+      if (processedDamages.length > 0) {
+        await tx.insert(billingDamages).values(
+          processedDamages.map((d) => ({
+            billingId,
+            description: d.description,
+            amount: String(d.amount),
+          })),
+        );
+      }
+
+      return loadBillingAggregate(billingId);
     });
   },
 

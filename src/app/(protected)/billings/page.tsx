@@ -6,6 +6,7 @@ import {
   useGetBillingsQuery,
   usePayBillingMutation,
   useCreateBillingMutation,
+  useUpdateBillingMutation,
 } from '@/api/billingApi';
 import { useGetItemsQuery } from '@/api/itemApi';
 import { useGetCustomersQuery } from '@/api/customerApi';
@@ -34,20 +35,28 @@ import {
   Trash2,
   Download,
   Eye,
+  Pencil,
   AlertTriangle,
 } from 'lucide-react';
 import CostBreakdown from '@/components/CostBreakdown';
 import { compareValues, getNextSortDirection, type SortDirection } from '@/lib/tableUtils';
 import { downloadAttachment } from '@/lib/blobDownload';
+import {
+  BILL_PERIOD_OPTIONS_MONTHS,
+  DEFAULT_BILL_PERIOD_MONTHS,
+  calculateBillPeriodEndDate,
+} from '@/lib/billing/period';
 
 const BillingRow = React.memo(function BillingRow({
   billing,
   onPay,
   onView,
+  onEdit,
 }: {
   billing: any;
   onPay: (id: number) => void;
   onView: (billing: any) => void;
+  onEdit: (billing: any) => void;
 }) {
   const handleDownloadInvoice = async () => {
     try {
@@ -103,6 +112,17 @@ const BillingRow = React.memo(function BillingRow({
           >
             <Download className="size-3" />
           </Button>
+          {billing.status !== 'paid' && (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="text-amber-600"
+              title="Edit Billing"
+              onClick={() => onEdit(billing)}
+            >
+              <Pencil className="size-3" />
+            </Button>
+          )}
           {billing.status !== 'paid' && (
             <Button size="icon-xs" variant="ghost" className="text-green-600" onClick={() => onPay(billing.id)}>
               <CheckCircle2 className="size-3" />
@@ -189,6 +209,7 @@ export default function BillingsPage() {
 
   const [payBilling] = usePayBillingMutation();
   const [createBilling, { isLoading: isCreating }] = useCreateBillingMutation();
+  const [updateBilling, { isLoading: isUpdating }] = useUpdateBillingMutation();
 
   const { data: allItems = [] } = useGetItemsQuery();
   const { data: allCustomers = [] } = useGetCustomersQuery();
@@ -205,6 +226,8 @@ export default function BillingsPage() {
   const [newCustomerId, setNewCustomerId] = useState<number | ''>('');
   const [newRentalId, setNewRentalId] = useState<number | ''>('');
   const [newDueDate, setNewDueDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [newBillPeriodMonths, setNewBillPeriodMonths] = useState<number>(DEFAULT_BILL_PERIOD_MONTHS);
+  const [editingBillingId, setEditingBillingId] = useState<number | null>(null);
   const [newItems, setNewItems] = useState<
     { itemId: number | ''; quantity: number; rate: number; total: number }[]
   >([{ itemId: '', quantity: 1, rate: 0, total: 0 }]);
@@ -254,7 +277,16 @@ export default function BillingsPage() {
     }
   };
 
-  const grandTotal = useMemo(() => newItems.reduce((sum, item) => sum + item.total, 0), [newItems]);
+  const monthlyRentTotal = useMemo(() => newItems.reduce((sum, item) => sum + item.total, 0), [newItems]);
+  const grandTotal = useMemo(
+    () => monthlyRentTotal * newBillPeriodMonths,
+    [monthlyRentTotal, newBillPeriodMonths],
+  );
+
+  const billingEndDate = useMemo(
+    () => (newDueDate ? calculateBillPeriodEndDate(newDueDate, newBillPeriodMonths) : ''),
+    [newDueDate, newBillPeriodMonths],
+  );
 
   const totalDamages = useMemo(
     () => newDamages.reduce((sum, d) => sum + d.amount, 0),
@@ -310,37 +342,78 @@ export default function BillingsPage() {
     setNewItems(updated);
   };
 
+  const resetBillingForm = () => {
+    setNewCustomerId('');
+    setNewRentalId('');
+    setNewDueDate(new Date().toISOString().slice(0, 10));
+    setNewBillPeriodMonths(DEFAULT_BILL_PERIOD_MONTHS);
+    setEditingBillingId(null);
+    setNewItems([{ itemId: '', quantity: 1, rate: 0, total: 0 }]);
+    setNewDamages([]);
+    setAvailableDeposit(0);
+    setNewLabourCost('');
+    setNewTransportCost('');
+  };
+
+  const handleEdit = (billing: any) => {
+    setEditingBillingId(billing.id);
+    setNewCustomerId(billing.customerId ?? billing.Customer?.id ?? '');
+    setNewRentalId(billing.rentalId ?? '');
+    setNewDueDate(billing.dueDate ? new Date(billing.dueDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    // Load the previously persisted Bill Period rather than resetting to the default.
+    setNewBillPeriodMonths(Number(billing.billPeriodMonths) || DEFAULT_BILL_PERIOD_MONTHS);
+    setAvailableDeposit(Number(billing.availableDeposit) || 0);
+    setNewLabourCost(billing.labourCost ? String(billing.labourCost) : '');
+    setNewTransportCost(billing.transportCost ? String(billing.transportCost) : '');
+    const items = (billing.BillingItems || []).map((bi: any) => ({
+      itemId: bi.itemId ?? '',
+      quantity: Number(bi.quantity) || 1,
+      rate: Number(bi.rate) || 0,
+      total: (Number(bi.quantity) || 1) * (Number(bi.rate) || 0),
+    }));
+    setNewItems(items.length > 0 ? items : [{ itemId: '', quantity: 1, rate: 0, total: 0 }]);
+    setNewDamages(
+      (billing.BillingDamages || []).map((bd: any) => ({
+        description: bd.description,
+        amount: Number(bd.amount) || 0,
+      })),
+    );
+    setNewOpen(true);
+  };
+
   const handleCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const validItems = newItems.filter((it) => it.itemId !== '' && it.quantity > 0 && it.rate >= 0);
     if (validItems.length === 0) return toast.warning('Please add at least one valid item');
     if (!newCustomerId) return toast.warning('Please select a customer');
 
+    const payload = {
+      customerId: typeof newCustomerId === 'string' ? undefined : newCustomerId,
+      rentalId: newRentalId === '' ? undefined : Number(newRentalId),
+      amount: finalPayable,
+      dueDate: newDueDate,
+      billPeriodMonths: newBillPeriodMonths,
+      status: 'pending' as const,
+      items: validItems as any,
+      damages: newDamages.filter((d) => d.description !== '' && d.amount > 0),
+      availableDeposit,
+      labourCost: newLabourCost === '' ? undefined : Number(newLabourCost),
+      transportCost: newTransportCost === '' ? undefined : Number(newTransportCost),
+    };
+
     try {
-      await createBilling({
-        customerId: typeof newCustomerId === 'string' ? undefined : newCustomerId,
-        rentalId: newRentalId === '' ? undefined : Number(newRentalId),
-        amount: finalPayable,
-        dueDate: newDueDate,
-        status: 'pending',
-        items: validItems as any,
-        damages: newDamages.filter((d) => d.description !== '' && d.amount > 0),
-        availableDeposit,
-        labourCost: newLabourCost === '' ? undefined : Number(newLabourCost),
-        transportCost: newTransportCost === '' ? undefined : Number(newTransportCost),
-      }).unwrap();
+      if (editingBillingId != null) {
+        await updateBilling({ id: editingBillingId, body: payload }).unwrap();
+        toast.success('Billing updated successfully');
+      } else {
+        await createBilling(payload).unwrap();
+        toast.success('Billing created successfully');
+      }
 
       setNewOpen(false);
-      setNewCustomerId('');
-      setNewRentalId('');
-      setNewItems([{ itemId: '', quantity: 1, rate: 0, total: 0 }]);
-      setNewDamages([]);
-      setAvailableDeposit(0);
-      setNewLabourCost('');
-      setNewTransportCost('');
-      toast.success('Billing created successfully');
+      resetBillingForm();
     } catch {
-      toast.error('Failed to create billing');
+      toast.error(editingBillingId != null ? 'Failed to update billing' : 'Failed to create billing');
     }
   };
 
@@ -351,7 +424,13 @@ export default function BillingsPage() {
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Billings</h1>
           <p className="text-muted-foreground">Manage invoices, payments, and billing history.</p>
         </div>
-        <Button onClick={() => setNewOpen(true)} className="w-full sm:w-auto">
+        <Button
+          onClick={() => {
+            resetBillingForm();
+            setNewOpen(true);
+          }}
+          className="w-full sm:w-auto"
+        >
           <Plus className="size-4 mr-2" />
           New Billing
         </Button>
@@ -485,7 +564,7 @@ export default function BillingsPage() {
                 </TableHeader>
                 <TableBody>
                   {paginatedBillings.map((b: any) => (
-                    <BillingRow key={b.id} billing={b} onPay={payBilling} onView={handleView} />
+                    <BillingRow key={b.id} billing={b} onPay={payBilling} onView={handleView} onEdit={handleEdit} />
                   ))}
                 </TableBody>
               </Table>
@@ -524,11 +603,21 @@ export default function BillingsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog
+        open={newOpen}
+        onOpenChange={(open) => {
+          setNewOpen(open);
+          if (!open) resetBillingForm();
+        }}
+      >
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Create New Billing</DialogTitle>
-            <DialogDescription>Select customer and amount to create a billing record.</DialogDescription>
+            <DialogTitle>{editingBillingId != null ? 'Edit Billing' : 'Create New Billing'}</DialogTitle>
+            <DialogDescription>
+              {editingBillingId != null
+                ? 'Update the bill period, items, and charges. All amounts recalculate automatically.'
+                : 'Select customer and amount to create a billing record.'}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -563,6 +652,31 @@ export default function BillingsPage() {
                   onChange={(e) => setNewDueDate(e.target.value)}
                   required
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="billPeriod">Bill Period</Label>
+                <select
+                  id="billPeriod"
+                  className="w-full p-2 border rounded-md bg-background text-sm"
+                  value={newBillPeriodMonths}
+                  onChange={(e) => setNewBillPeriodMonths(Number(e.target.value))}
+                  required
+                >
+                  {BILL_PERIOD_OPTIONS_MONTHS.map((m) => (
+                    <option key={m} value={m}>
+                      {m} {m === 1 ? 'Month' : 'Months'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Billing Period Range</Label>
+                <div className="h-9 flex items-center px-3 border rounded-md bg-muted/50 text-sm">
+                  {newDueDate ? `${new Date(newDueDate).toLocaleDateString('en-IN')} to ${billingEndDate ? new Date(billingEndDate).toLocaleDateString('en-IN') : '—'}` : '—'}
+                </div>
               </div>
             </div>
 
@@ -649,9 +763,9 @@ export default function BillingsPage() {
                       />
                     </div>
                     <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Total</Label>
+                      <Label className="text-[10px]">Total ({newBillPeriodMonths}mo)</Label>
                       <div className="h-8 flex items-center text-xs font-semibold px-2 bg-muted rounded-md">
-                        ₹{item.total.toFixed(2)}
+                        ₹{(item.total * newBillPeriodMonths).toFixed(2)}
                       </div>
                     </div>
                     <div className="col-span-1">
@@ -764,7 +878,7 @@ export default function BillingsPage() {
               <h4 className="text-sm font-semibold">Bill Summary</h4>
               <div className="space-y-1 text-sm bg-muted/30 p-3 rounded-md border">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Rent Amount:</span>
+                  <span className="text-muted-foreground">Rent Amount ({newBillPeriodMonths} {newBillPeriodMonths === 1 ? 'month' : 'months'}):</span>
                   <span>₹{grandTotal.toFixed(2)}</span>
                 </div>
                 {totalDamages > 0 && (
@@ -826,8 +940,14 @@ export default function BillingsPage() {
               <Button type="button" variant="outline" onClick={() => setNewOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isCreating}>
-                {isCreating ? 'Creating...' : 'Create Billing'}
+              <Button type="submit" disabled={isCreating || isUpdating}>
+                {editingBillingId != null
+                  ? isUpdating
+                    ? 'Updating...'
+                    : 'Update Billing'
+                  : isCreating
+                    ? 'Creating...'
+                    : 'Create Billing'}
               </Button>
             </DialogFooter>
           </form>
@@ -861,9 +981,21 @@ export default function BillingsPage() {
                   <p className="text-muted-foreground">Due Date</p>
                   <p className="font-semibold">{new Date(selectedBilling.dueDate).toLocaleDateString()}</p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground">Bill Period</p>
+                  <p className="font-semibold">
+                    {selectedBilling.billPeriodMonths ?? 1} {(selectedBilling.billPeriodMonths ?? 1) === 1 ? 'Month' : 'Months'}
+                    {' '}
+                    ({new Date(selectedBilling.dueDate).toLocaleDateString('en-IN')} to{' '}
+                    {selectedBilling.billingEndDate
+                      ? new Date(selectedBilling.billingEndDate).toLocaleDateString('en-IN')
+                      : '—'}
+                    )
+                  </p>
+                </div>
                 {selectedBilling.Rental?.startDate && selectedBilling.Rental?.endDate && (
                   <div>
-                    <p className="text-muted-foreground">Billing Period</p>
+                    <p className="text-muted-foreground">Rental Duration</p>
                     <p className="font-semibold">
                       {new Date(selectedBilling.Rental.startDate).toLocaleDateString('en-IN')} to{' '}
                       {new Date(selectedBilling.Rental.endDate).toLocaleDateString('en-IN')}

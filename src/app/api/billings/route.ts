@@ -19,6 +19,13 @@ const createBillingSchema = z.object({
   customerId: z.number().int().positive().optional(),
   amount: z.union([z.number(), z.string()]).optional(),
   dueDate: z.string().optional(),
+  billPeriodMonths: z
+    .union([z.number(), z.string()])
+    .refine((v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0.5 && n <= 36;
+    }, 'billPeriodMonths must be between 0.5 and 36')
+    .optional(),
   status: z.enum(['pending', 'paid', 'overdue']).optional(),
   labourCost: z.union([z.number(), z.string()]).nullish(),
   transportCost: z.union([z.number(), z.string()]).nullish(),

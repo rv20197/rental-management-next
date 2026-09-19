@@ -143,6 +143,10 @@ export const billings = pgTable(
     customerId: integer('customerId').references(() => customers.id, { onDelete: 'cascade' }),
     amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
     dueDate: date('dueDate', { mode: 'string' }).notNull(),
+    // Length of the Bill Period, in months, measured from `dueDate`. Defaults
+    // to 1 month but is user-selectable and persisted so edits/regeneration
+    // reuse the previously selected value instead of the default.
+    billPeriodMonths: decimal('billPeriodMonths', { precision: 5, scale: 2 }).notNull().default('1'),
     status: billingStatusEnum('status').notNull().default('pending'),
     paymentDate: date('paymentDate', { mode: 'string' }),
     returnedQuantity: integer('returnedQuantity'),

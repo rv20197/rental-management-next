@@ -26,6 +26,11 @@ export interface Billing {
   customerId?: number;
   amount: number;
   dueDate: string;
+  /** Bill Period length, in months, from dueDate. Defaults to 1. */
+  billPeriodMonths?: number;
+  /** Server-computed: dueDate (billingStartDate) + billPeriodMonths. */
+  billingStartDate?: string;
+  billingEndDate?: string | null;
   status: 'pending' | 'paid' | 'overdue';
   createdAt?: string;
   totalDamages?: number;
@@ -44,6 +49,8 @@ export interface CreateBillingPayload {
   customerId?: number;
   amount: number;
   dueDate: string;
+  /** Bill Period length, in months, from dueDate. Defaults to 1. */
+  billPeriodMonths?: number;
   status?: 'pending' | 'paid' | 'overdue';
   items?: Partial<BillingItem>[];
   damages?: Partial<BillingDamage>[];
@@ -51,6 +58,8 @@ export interface CreateBillingPayload {
   labourCost?: number;
   transportCost?: number;
 }
+
+export type UpdateBillingPayload = CreateBillingPayload;
 
 export interface ReturnBillingPayload {
   rentalId: number;
@@ -78,6 +87,10 @@ export const billingApi = createApi({
     createBilling: builder.mutation<Billing, CreateBillingPayload>({
       query: (body) => ({ url: 'billings', method: 'POST', body }),
       invalidatesTags: ['Billing'],
+    }),
+    updateBilling: builder.mutation<Billing, { id: number; body: UpdateBillingPayload }>({
+      query: ({ id, body }) => ({ url: `billings/${id}`, method: 'PUT', body }),
+      invalidatesTags: (_, __, { id }) => ['Billing', { type: 'Billing', id }],
     }),
     payBilling: builder.mutation<Billing, number>({
       query: (id) => ({ url: `billings/${id}/pay`, method: 'PUT' }),
@@ -110,6 +123,7 @@ export const {
   useGetBillingsQuery,
   useGetBillingQuery,
   useCreateBillingMutation,
+  useUpdateBillingMutation,
   usePayBillingMutation,
   useReturnAndBillMutation,
 } = billingApi;
