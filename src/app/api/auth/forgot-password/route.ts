@@ -7,22 +7,14 @@ import { sendEmail } from '@/lib/email';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { ensureDbReady } from '@/lib/db/setup';
-import { createLimiter, enforceLimit, getClientIp } from '@/lib/rateLimit';
 import { json, jsonError } from '@/lib/http';
 
 const schema = z.object({ email: z.string().min(1) });
 
 const RESPONSE_MESSAGE = 'If an account with that email exists, a password reset link has been sent.';
 
-// 3 reset emails per IP per hour. Caps "spam the reset endpoint" attacks
-// without locking out an honest user who mistyped their email a couple of
-// times.
-const limiter = createLimiter('forgot-password', 3, '1 h');
-
 export async function POST(request: Request) {
   await ensureDbReady();
-  const limit = await enforceLimit(limiter, getClientIp(request));
-  if (limit) return limit;
 
   let body: unknown;
   try {

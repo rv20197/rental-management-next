@@ -5,22 +5,15 @@ import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { hashPassword } from '@/lib/auth/password';
 import { ensureDbReady } from '@/lib/db/setup';
-import { createLimiter, enforceLimit, getClientIp } from '@/lib/rateLimit';
 import { json, jsonError } from '@/lib/http';
 
 const schema = z.object({ password: z.string().min(1) });
-
-// 5 reset submissions per IP per hour. Defends against attackers who
-// scraped a leaked reset token and try to brute-force the password form.
-const limiter = createLimiter('reset-password', 5, '1 h');
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   await ensureDbReady();
-  const limit = await enforceLimit(limiter, getClientIp(request));
-  if (limit) return limit;
 
   const { token } = await params;
   if (!token) return jsonError('Invalid token', 400);

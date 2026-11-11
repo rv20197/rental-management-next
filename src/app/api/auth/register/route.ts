@@ -4,7 +4,6 @@ import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { hashPassword } from '@/lib/auth/password';
 import { ensureDbReady } from '@/lib/db/setup';
-import { createLimiter, enforceLimit, getClientIp } from '@/lib/rateLimit';
 import { json, jsonError } from '@/lib/http';
 
 const registerSchema = z.object({
@@ -13,14 +12,8 @@ const registerSchema = z.object({
   password: z.string().min(1),
 });
 
-// 5 sign-ups per IP per hour. Keeps a single home/office IP from being
-// blocked while still slowing automated account creation.
-const limiter = createLimiter('register', 5, '1 h');
-
 export async function POST(request: Request) {
   await ensureDbReady();
-  const limit = await enforceLimit(limiter, getClientIp(request));
-  if (limit) return limit;
 
   let body: unknown;
   try {
