@@ -1,0 +1,1 @@
+ALTER TABLE "Billings" ADD COLUMN "returnDate" date;

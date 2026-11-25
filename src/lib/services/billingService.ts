@@ -157,6 +157,8 @@ interface ReturnAndBillPayload {
   returnLabourCost?: number | string;
   returnTransportCost?: number | string;
   damagesCost?: number | string;
+  /** Actual return date (YYYY-MM-DD). Defaults to today. Past or future dates are allowed. */
+  returnDate?: string;
 }
 
 async function loadBillingAggregate(id: number) {
@@ -424,9 +426,12 @@ export const BillingService = {
       if (rental.status !== 'active') throw new Error('Rental is no longer active');
 
       const now = new Date();
+      const returnDateStr = payload.returnDate || now.toISOString().slice(0, 10);
+      const returnDate = new Date(returnDateStr);
+      if (Number.isNaN(returnDate.getTime())) throw new Error('Invalid return date');
       const startDate = new Date(rental.startDate);
       const endDate = new Date(rental.endDate);
-      const monthsRented = calculateMonthsRented(startDate, now, endDate);
+      const monthsRented = calculateMonthsRented(startDate, returnDate, endDate);
 
       let totalBillAmount = labourCostAmount + transportCostAmount + returnLabourCostNum + returnTransportCostNum + damagesCostNum;
       let totalReturnedQuantity = 0;
@@ -446,6 +451,7 @@ export const BillingService = {
           returnTransportCost: String(returnTransportCostNum),
           damagesCost: String(damagesCostNum),
           returnedQuantity: totalReturnedQuantity,
+          returnDate: returnDateStr,
         })
         .returning();
 

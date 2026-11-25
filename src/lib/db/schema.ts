@@ -167,6 +167,11 @@ export const billings = pgTable(
     status: billingStatusEnum('status').notNull().default('pending'),
     paymentDate: date('paymentDate', { mode: 'string' }),
     returnedQuantity: integer('returnedQuantity'),
+    // The date the items on this return bill were actually returned. Chosen by
+    // the user when processing a return (defaults to today; may be past or
+    // future). Nullable for non-return bills and for return bills created
+    // before this column existed — those fall back to createdAt.
+    returnDate: date('returnDate', { mode: 'string' }),
     returnedUnitIds: json('returnedUnitIds').$type<number[] | null>(),
     totalDamages: decimal('totalDamages', { precision: 12, scale: 2 }).default('0'),
     depositUsed: decimal('depositUsed', { precision: 12, scale: 2 }).default('0'),

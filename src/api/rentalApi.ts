@@ -37,7 +37,7 @@ export interface Rental {
   createdAt?: string;
   Item?: Item;
   RentalItems?: RentalItem[];
-  Billings?: { createdAt?: string; returnedQuantity?: number | null }[];
+  Billings?: { createdAt?: string; returnDate?: string | null; returnedQuantity?: number | null }[];
   Customer?: Customer;
 }
 
@@ -125,6 +125,7 @@ export const rentalApi = createApi({
         returnLabourCost?: number;
         returnTransportCost?: number;
         damagesCost?: number;
+        returnDate?: string;
       }
     >({
       query: (body) => ({ url: 'billings/return', method: 'POST', body }),

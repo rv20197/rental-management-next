@@ -205,8 +205,8 @@ export function generateRentalInvoicePdf(billing: any): Promise<RentalInvoicePdf
 
           doc.fillColor('#444444').font('Helvetica');
           const itemName = bi.Item?.name || bi.description || 'Unknown Item';
-          const itemDate = hasBeenReturned && (bi.createdAt || billing.returnDate || billing.createdAt)
-            ? formatDate(bi.createdAt || billing.returnDate || billing.createdAt)
+          const itemDate = hasBeenReturned && (billing.returnDate || bi.createdAt || billing.createdAt)
+            ? formatDate(billing.returnDate || bi.createdAt || billing.createdAt)
             : '';
           doc.text(itemName, COL_ITEM_X + 2, y, { width: COL_ITEM_W, lineBreak: false });
           doc.text(itemDate, COL_DATE_X, y, { width: COL_DATE_W, align: 'right', lineBreak: false });

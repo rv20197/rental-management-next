@@ -41,6 +41,8 @@ export interface Billing {
   billingDurationDays?: number | null;
   status: 'pending' | 'paid' | 'overdue';
   createdAt?: string;
+  /** Actual return date for return bills (YYYY-MM-DD). */
+  returnDate?: string | null;
   totalDamages?: number;
   depositUsed?: number;
   availableDeposit?: number;
@@ -82,6 +84,8 @@ export interface ReturnBillingPayload {
   returnLabourCost?: number;
   returnTransportCost?: number;
   damagesCost?: number;
+  /** Actual return date (YYYY-MM-DD). Defaults to today on the server. */
+  returnDate?: string;
 }
 
 export const billingApi = createApi({

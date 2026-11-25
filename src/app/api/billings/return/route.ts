@@ -15,6 +15,11 @@ const returnPayloadSchema = z.object({
   returnLabourCost: z.union([z.number(), z.string()]).optional(),
   returnTransportCost: z.union([z.number(), z.string()]).optional(),
   damagesCost: z.union([z.number(), z.string()]).optional(),
+  returnDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid return date')
+    .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid return date')
+    .optional(),
 });
 
 export async function POST(request: Request) {

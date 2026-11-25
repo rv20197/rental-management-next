@@ -346,6 +346,11 @@ export default function RentalsPage() {
   const [returnReturnLabourCost, setReturnReturnLabourCost] = useState<string>('');
   const [returnReturnTransportCost, setReturnReturnTransportCost] = useState<string>('');
   const [returnDamagesCost, setReturnDamagesCost] = useState<string>('');
+  const todayLocal = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const [returnDate, setReturnDate] = useState<string>(todayLocal);
 
   const selectedReturnRental = useMemo(
     () => allRentals.find((r) => r.id === selectedReturnRentalId) || null,
@@ -362,6 +367,7 @@ export default function RentalsPage() {
 
   const handleOpenReturn = (rental: Rental) => {
     setSelectedReturnRentalId(rental.id);
+    setReturnDate(todayLocal());
     const firstAvailableItem = rental.RentalItems?.find(
       (ri) => ri.quantity - (ri.returnedQuantity || 0) > 0,
     );
@@ -379,6 +385,10 @@ export default function RentalsPage() {
 
   const handleReturn = async () => {
     if (!selectedReturnRentalId || returnItems.length === 0) return;
+    if (!returnDate) {
+      toast.error('Please select a return date.');
+      return;
+    }
     try {
       const result = await returnAndBill({
         rentalId: selectedReturnRentalId,
@@ -388,6 +398,7 @@ export default function RentalsPage() {
         returnLabourCost: returnReturnLabourCost === '' ? undefined : Number(returnReturnLabourCost),
         returnTransportCost: returnReturnTransportCost === '' ? undefined : Number(returnReturnTransportCost),
         damagesCost: returnDamagesCost === '' ? undefined : Number(returnDamagesCost),
+        returnDate,
       }).unwrap();
       setSelectedReturnRentalId(null);
       setReturnItems([]);
@@ -863,6 +874,18 @@ export default function RentalsPage() {
             <DialogDescription>Select items and quantities being returned.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <div className="space-y-2 sm:max-w-xs">
+              <Label htmlFor="returnDate">Return Date</Label>
+              <Input
+                id="returnDate"
+                type="date"
+                required
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Defaults to today. Past or future dates are allowed.</p>
+            </div>
+
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Items to Return</Label>
@@ -1607,10 +1630,12 @@ export default function RentalsPage() {
                     </p>
                   </div>
                 )}
-                {hasReturnedItems && returnBilling?.createdAt && (
+                {hasReturnedItems && (returnBilling?.returnDate || returnBilling?.createdAt) && (
                   <div>
                     <p className="text-muted-foreground">Return Date</p>
-                    <p className="font-semibold">{new Date(returnBilling.createdAt).toLocaleDateString('en-IN')}</p>
+                    <p className="font-semibold">
+                      {new Date((returnBilling.returnDate || returnBilling.createdAt)!).toLocaleDateString('en-IN')}
+                    </p>
                   </div>
                 )}
                 {selectedRental.startDate && selectedRental.endDate && (
