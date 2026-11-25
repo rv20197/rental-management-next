@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then yarn db:migrate; fi && yarn build",
   "crons": [
     {
       "path": "/api/cron/reminders",
